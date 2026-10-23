@@ -104,26 +104,44 @@ def clean_jarvis_text(text: str) -> str:
 
 current_model_idx = 0
 chat_session = None
+_last_date = None
 
 def get_current_model_name() -> str:
     global current_model_idx
     return MODELS_POOL[current_model_idx % len(MODELS_POOL)]
 
+def get_dynamic_system_prompt() -> str:
+    from datetime import datetime
+    tz = config.get_tz()
+    now = datetime.now(tz)
+    date_str = now.strftime("%A, %B %d, %Y")
+    time_str = now.strftime("%I:%M %p")
+    return SYSTEM_PROMPT + f"\nCURRENT DATE & TIME: Today is {date_str}. Current time is {time_str} IST.\nAlways use this as the accurate real-time date and time for all responses.\n"
+
 def init_chat_session():
-    global chat_session
+    global chat_session, _last_date
+    from datetime import datetime
     model_name = get_current_model_name()
     model = genai.GenerativeModel(
         model_name=model_name,
         tools=tools_list,
-        system_instruction=SYSTEM_PROMPT
+        system_instruction=get_dynamic_system_prompt()
     )
     chat_session = model.start_chat(enable_automatic_function_calling=True)
+    _last_date = datetime.now(config.get_tz()).date()
     return chat_session
 
 init_chat_session()
 
 def query_agent(prompt: str) -> str:
-    global current_model_idx, chat_session
+    global current_model_idx, chat_session, _last_date
+    from datetime import datetime
+
+    # Refresh chat session if date has changed (keeps date accurate across midnight)
+    today = datetime.now(config.get_tz()).date()
+    if _last_date is None or today != _last_date:
+        chat_session = None
+
     attempts = 0
     max_attempts = len(MODELS_POOL)
 
