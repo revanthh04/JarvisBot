@@ -21,13 +21,20 @@ if raw_ids:
 GOOGLE_TOKEN_JSON = os.getenv("GOOGLE_TOKEN_JSON", "").strip()
 if GOOGLE_TOKEN_JSON:
     token_path = os.path.join(os.path.dirname(__file__), "token.json")
-    if not os.path.exists(token_path):
-        try:
-            decoded = base64.b64decode(GOOGLE_TOKEN_JSON).decode("utf-8")
-            with open(token_path, "w") as f:
-                f.write(decoded)
-        except Exception:
-            pass
+    try:
+        content = None
+        if GOOGLE_TOKEN_JSON.startswith("{"):
+            content = GOOGLE_TOKEN_JSON
+        else:
+            try:
+                content = base64.b64decode(GOOGLE_TOKEN_JSON).decode("utf-8")
+            except Exception:
+                content = GOOGLE_TOKEN_JSON
+        if content:
+            with open(token_path, "w", encoding="utf-8") as f:
+                f.write(content)
+    except Exception:
+        pass
 
 def is_authorized(user_id: int) -> bool:
     if not ALLOWED_USER_IDS:

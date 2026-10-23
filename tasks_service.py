@@ -38,7 +38,11 @@ def list_tasks(completed: bool = False) -> list:
     conn.close()
     return [{"id": r[0], "title": r[1], "due_date": r[2], "completed": bool(r[3]), "created_at": r[4]} for r in rows]
 
-def complete_task(task_id: int) -> bool:
+def complete_task(task_id) -> bool:
+    try:
+        task_id = int(float(task_id))
+    except Exception:
+        return False
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("UPDATE tasks SET completed = 1 WHERE id = ?", (task_id,))
@@ -47,7 +51,11 @@ def complete_task(task_id: int) -> bool:
     conn.close()
     return affected
 
-def delete_task(task_id: int) -> bool:
+def delete_task(task_id) -> bool:
+    try:
+        task_id = int(float(task_id))
+    except Exception:
+        return False
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))

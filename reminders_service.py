@@ -28,8 +28,9 @@ def create_reminder(message: str, delay_minutes: int = 0, time_str: str = "") ->
     """
     Creates a reminder.
     Either provide delay_minutes (e.g. 15 for 15 minutes from now)
-    OR provide time_str (e.g. '13:20' or '2026-10-23 13:20' or '1:20 PM')
+    OR provide time_str (e.g. '13:20', '1:20 PM', 'in 15 minutes', '1 hour')
     """
+    import re
     tz = config.get_tz()
     now = datetime.now(tz)
 
@@ -38,25 +39,34 @@ def create_reminder(message: str, delay_minutes: int = 0, time_str: str = "") ->
     if delay_minutes and delay_minutes > 0:
         remind_dt = now + timedelta(minutes=delay_minutes)
     elif time_str:
-        # Try parsing various time formats
-        time_clean = time_str.strip().upper()
-        # Case: HH:MM or HH:MM AM/PM
-        for fmt in ["%H:%M", "%I:%M %p", "%I:%M%p", "%Y-%m-%d %H:%M"]:
-            try:
-                parsed = datetime.strptime(time_clean, fmt)
-                if fmt in ["%H:%M", "%I:%M %p", "%I:%M%p"]:
-                    remind_dt = now.replace(hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0)
-                    if remind_dt < now:
-                        # If time already passed today, assume tomorrow
-                        remind_dt = remind_dt + timedelta(days=1)
-                else:
-                    remind_dt = tz.localize(parsed)
-                break
-            except ValueError:
-                continue
+        time_clean = time_str.strip().lower()
+        
+        # Check for relative minutes: e.g. "in 15 mins", "15 minutes", "10m"
+        match_min = re.search(r'(\d+)\s*(?:m|min|minute|minutes)', time_clean)
+        match_hr = re.search(r'(\d+)\s*(?:h|hr|hour|hours)', time_clean)
+        
+        if match_hr:
+            hrs = int(match_hr.group(1))
+            remind_dt = now + timedelta(hours=hrs)
+        elif match_min:
+            mins = int(match_min.group(1))
+            remind_dt = now + timedelta(minutes=mins)
+        else:
+            time_upper = time_clean.upper()
+            for fmt in ["%H:%M", "%I:%M %p", "%I:%M%p", "%I %p", "%Y-%m-%d %H:%M"]:
+                try:
+                    parsed = datetime.strptime(time_upper, fmt)
+                    if fmt in ["%H:%M", "%I:%M %p", "%I:%M%p", "%I %p"]:
+                        remind_dt = now.replace(hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0)
+                        if remind_dt < now:
+                            remind_dt = remind_dt + timedelta(days=1)
+                    else:
+                        remind_dt = tz.localize(parsed)
+                    break
+                except ValueError:
+                    continue
 
     if not remind_dt:
-        # Default to 10 minutes from now if ambiguous
         remind_dt = now + timedelta(minutes=10)
 
     user_id = config.ALLOWED_USER_IDS[0] if config.ALLOWED_USER_IDS else 0

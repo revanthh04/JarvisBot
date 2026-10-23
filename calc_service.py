@@ -1,6 +1,10 @@
 import requests
 
 def convert_currency(amount: float, from_curr: str = "USD", to_curr: str = "INR") -> dict:
+    try:
+        amount = float(amount)
+    except Exception:
+        amount = 0.0
     from_curr = from_curr.upper().strip()
     to_curr = to_curr.upper().strip()
     url = f"https://open.er-api.com/v6/latest/{from_curr}"

@@ -53,7 +53,11 @@ def list_notes(limit: int = 10) -> list:
     conn.close()
     return [{"id": r[0], "title": r[1], "content": r[2], "tags": r[3], "created_at": r[4]} for r in rows]
 
-def delete_note(note_id: int) -> bool:
+def delete_note(note_id) -> bool:
+    try:
+        note_id = int(float(note_id))
+    except Exception:
+        return False
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM notes WHERE id = ?", (note_id,))
