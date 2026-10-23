@@ -31,6 +31,7 @@ import calc_service
 import voice_service
 import calendar_service
 import gmail_service
+import reminders_service
 
 # Logging setup
 logging.basicConfig(
@@ -335,6 +336,24 @@ async def cmd_agenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_rich_reply(update, f"📅 {events}")
 
 @restricted
+async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if len(args) >= 2 and args[0].isdigit():
+        mins = int(args[0])
+        msg = " ".join(args[1:])
+        res = reminders_service.create_reminder(message=msg, delay_minutes=mins)
+        await send_rich_reply(update, f"⏰ {res['status']}")
+    else:
+        active = reminders_service.list_active_reminders()
+        if not active:
+            await send_rich_reply(update, "⏰ No active reminders. Tell Jarvis: *'Remind me in 15 minutes to call client'* or use `/remind 15 Call client`.")
+        else:
+            lines = ["⏰ **Active Scheduled Reminders:**"]
+            for r in active:
+                lines.append(f"• **{r['remind_at']}**: {r['message']}")
+            await send_rich_reply(update, "\n".join(lines))
+
+@restricted
 async def cmd_speak(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = " ".join(context.args) if context.args else "Hello Revanth, Jarvis is at your service."
     audio_path = await voice_service.text_to_speech(text)
@@ -364,6 +383,16 @@ async def send_briefing_to_user(context: ContextTypes.DEFAULT_TYPE, user_id: int
         await context.bot.send_message(chat_id=user_id, text=html_msg, parse_mode=ParseMode.HTML)
     except Exception as e:
         logger.error(f"Failed to send briefing: {e}")
+
+async def check_reminders_job(context: ContextTypes.DEFAULT_TYPE):
+    due = reminders_service.get_due_reminders()
+    for rem in due:
+        reminders_service.mark_reminder_triggered(rem["id"])
+        msg = f"⏰ <b>REMINDER FOR REVANTH SIR</b>\n\n• {rem['message']}"
+        try:
+            await context.bot.send_message(chat_id=rem["user_id"], text=msg, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            logger.error(f"Failed to send reminder {rem['id']}: {e}")
 
 # Scheduled Jobs
 async def scheduled_morning_briefing(context: ContextTypes.DEFAULT_TYPE):
@@ -464,6 +493,7 @@ def main():
     app.add_handler(CommandHandler("cricket", cmd_cricket))
     app.add_handler(CommandHandler("convert", cmd_convert))
     app.add_handler(CommandHandler("agenda", cmd_agenda))
+    app.add_handler(CommandHandler("remind", cmd_remind))
     app.add_handler(CommandHandler("speak", cmd_speak))
     app.add_handler(CommandHandler("briefing", cmd_briefing))
 
@@ -478,7 +508,8 @@ def main():
         tz = config.get_tz()
         job_queue.run_daily(scheduled_morning_briefing, time(hour=8, minute=0, tzinfo=tz))
         job_queue.run_daily(scheduled_evening_habits, time(hour=21, minute=0, tzinfo=tz))
-        logger.info("Daily proactive scheduled jobs registered.")
+        job_queue.run_repeating(check_reminders_job, interval=15, first=5)
+        logger.info("Daily proactive scheduled jobs & dynamic reminder engine registered.")
 
     print("==================================================")
     print(" JARVIS Executive Assistant is active & polling! ")
