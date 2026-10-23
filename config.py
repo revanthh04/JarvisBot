@@ -1,4 +1,5 @@
 import os
+import base64
 from dotenv import load_dotenv
 import pytz
 
@@ -15,6 +16,18 @@ if raw_ids:
         uid = uid.strip()
         if uid.isdigit():
             ALLOWED_USER_IDS.append(int(uid))
+
+# Load Google token from environment variable for cloud deployment
+GOOGLE_TOKEN_JSON = os.getenv("GOOGLE_TOKEN_JSON", "").strip()
+if GOOGLE_TOKEN_JSON:
+    token_path = os.path.join(os.path.dirname(__file__), "token.json")
+    if not os.path.exists(token_path):
+        try:
+            decoded = base64.b64decode(GOOGLE_TOKEN_JSON).decode("utf-8")
+            with open(token_path, "w") as f:
+                f.write(decoded)
+        except Exception:
+            pass
 
 def is_authorized(user_id: int) -> bool:
     if not ALLOWED_USER_IDS:
