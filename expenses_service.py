@@ -52,6 +52,7 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS expenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER DEFAULT 5484600217,
             amount REAL NOT NULL,
             category TEXT NOT NULL,
             description TEXT,
@@ -59,7 +60,11 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # Self-healing migration for legacy relative dates
+    # Self-healing migration for user_id and legacy relative dates
+    try:
+        cursor.execute("ALTER TABLE expenses ADD COLUMN user_id INTEGER DEFAULT 5484600217")
+    except Exception:
+        pass
     try:
         cursor.execute("UPDATE expenses SET expense_date = DATE(created_at, '-1 day') WHERE LOWER(expense_date) = 'yesterday'")
         cursor.execute("UPDATE expenses SET expense_date = DATE(created_at) WHERE LOWER(expense_date) IN ('today', 'now')")
@@ -70,7 +75,9 @@ def init_db():
 
 init_db()
 
-def log_expense(amount: float, category: str = "General", description: str = "", expense_date: str = None) -> dict:
+def log_expense(amount: float, category: str = "General", description: str = "", expense_date: str = None, user_id: int = None) -> dict:
+    if user_id is None:
+        user_id = config.get_current_user_id()
     clean_date = normalize_expense_date(expense_date)
     try:
         amount_num = float(amount)
@@ -80,9 +87,9 @@ def log_expense(amount: float, category: str = "General", description: str = "",
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO expenses (amount, category, description, expense_date)
-        VALUES (?, ?, ?, ?)
-    """, (amount_num, category.strip().title(), description.strip(), clean_date))
+        INSERT INTO expenses (user_id, amount, category, description, expense_date)
+        VALUES (?, ?, ?, ?, ?)
+    """, (user_id, amount_num, category.strip().title(), description.strip(), clean_date))
     exp_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -102,7 +109,9 @@ def log_expense(amount: float, category: str = "General", description: str = "",
         "status": f"Logged ₹{amount_num:,.2f} for '{description}' under {category} on {clean_date}."
     }
 
-def get_monthly_summary(month=None, year=None) -> dict:
+def get_monthly_summary(month=None, year=None, user_id: int = None) -> dict:
+    if user_id is None:
+        user_id = config.get_current_user_id()
     today = date.today()
     try:
         month_int = int(float(month)) if month else today.month
@@ -120,12 +129,12 @@ def get_monthly_summary(month=None, year=None) -> dict:
     cursor.execute("""
         SELECT category, SUM(amount), COUNT(*)
         FROM expenses
-        WHERE expense_date LIKE ?
+        WHERE user_id = ? AND expense_date LIKE ?
         GROUP BY category
-    """, (month_str,))
+    """, (user_id, month_str))
     rows = cursor.fetchall()
 
-    cursor.execute("SELECT SUM(amount) FROM expenses WHERE expense_date LIKE ?", (month_str,))
+    cursor.execute("SELECT SUM(amount) FROM expenses WHERE user_id = ? AND expense_date LIKE ?", (user_id, month_str))
     total_row = cursor.fetchone()
     total = total_row[0] if total_row and total_row[0] else 0.0
 
@@ -137,13 +146,15 @@ def get_monthly_summary(month=None, year=None) -> dict:
         "by_category": breakdown
     }
 
-def search_expenses(category: str = "", query: str = "", date_str: str = "") -> dict:
+def search_expenses(category: str = "", query: str = "", date_str: str = "", user_id: int = None) -> dict:
     """Search expenses by category (e.g. Food), text keyword, or specific date."""
+    if user_id is None:
+        user_id = config.get_current_user_id()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
-    sql = "SELECT id, amount, category, description, expense_date FROM expenses WHERE 1=1"
-    params = []
+    sql = "SELECT id, amount, category, description, expense_date FROM expenses WHERE user_id = ?"
+    params = [user_id]
     
     if category and category.strip():
         sql += " AND LOWER(category) LIKE ?"
@@ -174,18 +185,20 @@ def search_expenses(category: str = "", query: str = "", date_str: str = "") -> 
         "entries": entries
     }
 
-def get_expenses_by_date(date_str: str = None) -> list:
+def get_expenses_by_date(date_str: str = None, user_id: int = None) -> list:
     norm_date = normalize_expense_date(date_str)
-    return search_expenses(date_str=norm_date).get("entries", [])
+    return search_expenses(date_str=norm_date, user_id=user_id).get("entries", [])
 
-def get_recent_expenses(limit: int = 10) -> list:
+def get_recent_expenses(limit: int = 10, user_id: int = None) -> list:
+    if user_id is None:
+        user_id = config.get_current_user_id()
     try:
         limit = int(float(limit))
     except Exception:
         limit = 10
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, amount, category, description, expense_date FROM expenses ORDER BY expense_date DESC, id DESC LIMIT ?", (limit,))
+    cursor.execute("SELECT id, amount, category, description, expense_date FROM expenses WHERE user_id = ? ORDER BY expense_date DESC, id DESC LIMIT ?", (user_id, limit))
     rows = cursor.fetchall()
     conn.close()
     return [{"id": r[0], "amount": r[1], "category": r[2], "description": r[3], "date": r[4]} for r in rows]

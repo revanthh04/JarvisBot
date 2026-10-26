@@ -1,6 +1,7 @@
 import sqlite3
 import os
 from datetime import datetime, date, timedelta
+import config
 
 DB_FILE = os.path.join(os.path.dirname(__file__), "habits.db")
 
@@ -10,10 +11,15 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS habits (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
+            user_id INTEGER DEFAULT 5484600217,
+            name TEXT NOT NULL,
             created_at DATE DEFAULT CURRENT_DATE
         )
     """)
+    try:
+        cursor.execute("ALTER TABLE habits ADD COLUMN user_id INTEGER DEFAULT 5484600217")
+    except Exception:
+        pass
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS habit_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,30 +34,43 @@ def init_db():
 
 init_db()
 
-def add_habit(name: str) -> dict:
+def add_habit(name: str, user_id: int = None) -> dict:
+    if user_id is None:
+        user_id = config.get_current_user_id()
     name = name.strip()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO habits (name) VALUES (?)", (name,))
+        cursor.execute("SELECT id FROM habits WHERE user_id = ? AND LOWER(name) = LOWER(?)", (user_id, name))
+        existing = cursor.fetchone()
+        if existing:
+            return {"success": False, "message": f"Habit '{name}' already exists in your list."}
+        cursor.execute("INSERT INTO habits (user_id, name) VALUES (?, ?)", (user_id, name))
         conn.commit()
         habit_id = cursor.lastrowid
         res = {"success": True, "id": habit_id, "name": name, "message": f"Habit '{name}' added."}
-    except sqlite3.IntegrityError:
-        res = {"success": False, "message": f"Habit '{name}' already exists."}
+    except Exception as e:
+        res = {"success": False, "message": f"Could not add habit: {e}"}
     finally:
         conn.close()
+    try:
+        import backup_service
+        backup_service.backup_all_databases()
+    except Exception:
+        pass
     return res
 
-def log_habit(name: str, log_date: str = None) -> dict:
+def log_habit(name: str, log_date: str = None, user_id: int = None) -> dict:
+    if user_id is None:
+        user_id = config.get_current_user_id()
     if not log_date:
         log_date = date.today().isoformat()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, name FROM habits WHERE LOWER(name) = LOWER(?)", (name.strip(),))
+    cursor.execute("SELECT id, name FROM habits WHERE user_id = ? AND LOWER(name) = LOWER(?)", (user_id, name.strip()))
     row = cursor.fetchone()
     if not row:
-        cursor.execute("INSERT INTO habits (name) VALUES (?)", (name.strip(),))
+        cursor.execute("INSERT INTO habits (user_id, name) VALUES (?, ?)", (user_id, name.strip()))
         habit_id = cursor.lastrowid
         habit_name = name.strip()
     else:
@@ -65,12 +84,19 @@ def log_habit(name: str, log_date: str = None) -> dict:
         res = {"success": True, "message": f"Habit '{habit_name}' was already logged for {log_date}."}
     finally:
         conn.close()
+    try:
+        import backup_service
+        backup_service.backup_all_databases()
+    except Exception:
+        pass
     return res
 
-def get_habit_streaks() -> list:
+def get_habit_streaks(user_id: int = None) -> list:
+    if user_id is None:
+        user_id = config.get_current_user_id()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, name FROM habits")
+    cursor.execute("SELECT id, name FROM habits WHERE user_id = ?", (user_id,))
     habits = cursor.fetchall()
     results = []
     today = date.today()
@@ -100,5 +126,5 @@ def get_habit_streaks() -> list:
     conn.close()
     return results
 
-def list_habits() -> list:
-    return get_habit_streaks()
+def list_habits(user_id: int = None) -> list:
+    return get_habit_streaks(user_id=user_id)

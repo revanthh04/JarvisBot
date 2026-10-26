@@ -2,6 +2,7 @@ import os
 import base64
 from dotenv import load_dotenv
 import pytz
+import contextvars
 
 load_dotenv()
 
@@ -10,6 +11,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 USER_TIMEZONE = os.getenv("USER_TIMEZONE", "Asia/Kolkata").strip()
 
+ADMIN_USER_ID = 5484600217
+OPEN_ACCESS = os.getenv("OPEN_ACCESS", "true").lower() in ("true", "1", "yes")
+
 raw_ids = os.getenv("ALLOWED_USER_IDS", "").strip()
 ALLOWED_USER_IDS = []
 if raw_ids:
@@ -17,6 +21,30 @@ if raw_ids:
         uid = uid.strip()
         if uid.isdigit():
             ALLOWED_USER_IDS.append(int(uid))
+
+# Context-isolated user state for multi-user concurrency
+_current_user_id_var = contextvars.ContextVar("current_user_id", default=ADMIN_USER_ID)
+_current_user_name_var = contextvars.ContextVar("current_user_name", default="Revanth Sir")
+
+def set_current_user(user_id: int, user_name: str = "User"):
+    _current_user_id_var.set(user_id)
+    _current_user_name_var.set(user_name)
+
+def get_current_user_id() -> int:
+    return _current_user_id_var.get()
+
+def get_current_user_name() -> str:
+    return _current_user_name_var.get()
+
+def is_admin(user_id: int) -> bool:
+    return user_id == ADMIN_USER_ID
+
+def is_authorized(user_id: int) -> bool:
+    if OPEN_ACCESS:
+        return True
+    if not ALLOWED_USER_IDS:
+        return True
+    return user_id in ALLOWED_USER_IDS or user_id == ADMIN_USER_ID
 
 # Load Google token from environment variable for cloud deployment
 GOOGLE_TOKEN_JSON = os.getenv("GOOGLE_TOKEN_JSON", "").strip()
@@ -36,11 +64,6 @@ if GOOGLE_TOKEN_JSON:
                 f.write(content)
     except Exception:
         pass
-
-def is_authorized(user_id: int) -> bool:
-    if not ALLOWED_USER_IDS:
-        return True  # If no user IDs set, open (not recommended)
-    return user_id in ALLOWED_USER_IDS
 
 def get_tz():
     try:

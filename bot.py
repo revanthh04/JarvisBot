@@ -131,11 +131,30 @@ def start_health_server(port=8080):
 # Security check decorator
 def restricted(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        user_id = update.effective_user.id
+        user = update.effective_user
+        if not user:
+            return
+        user_id = user.id
         if not config.is_authorized(user_id):
             logger.warning(f"Unauthorized access attempt by user {user_id}")
             if update.message:
-                await update.message.reply_text("⛔ Access Denied. Jarvis is restricted to authorized executive users.")
+                await update.message.reply_text("⛔ Access Denied.")
+            return
+        # Set context-isolated active user for this async request
+        name = user.first_name or "Friend"
+        if config.is_admin(user_id):
+            name = "Revanth Sir"
+        config.set_current_user(user_id, name)
+        return await func(update, context, *args, **kwargs)
+    return wrapper
+
+def admin_only(func):
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        user_id = update.effective_user.id
+        if not config.is_admin(user_id):
+            logger.warning(f"Non-admin user {user_id} attempted admin command {func.__name__}")
+            if update.message:
+                await update.message.reply_text("⛔ Workstation hardware and device controls are private and restricted to Revanth Sir.")
             return
         return await func(update, context, *args, **kwargs)
     return wrapper
@@ -143,32 +162,55 @@ def restricted(func):
 # Command Handlers
 @restricted
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = (
-        "🤖 **JARVIS Executive AI Assistant Online**\n\n"
-        "Welcome! All core subsystems are operational.\n\n"
-        "**Available Commands:**\n"
-        "• `/device` or `/pc` — System telemetry (CPU, RAM, Battery)\n"
-        "• `/screenshot` — Capture live desktop screen\n"
-        "• `/lock` — Lock computer workstation\n"
-        "• `/volume [action]` — PC Volume control (mute, up, down)\n"
-        "• `/clipboard [text]` — View or set PC clipboard\n"
-        "• `/tasks` — Manage your to-do list\n"
-        "• `/notes [query]` — Second Brain notes search\n"
-        "• `/books` — Track reading list and book page progress\n"
-        "• `/expenses` — View monthly expense ledger\n"
-        "• `/vault` — Data Guardian database backup & integrity status\n"
-        "• `/habits` — Habit streaks and daily check-ins\n"
-        "• `/weather [city]` — Live weather forecast\n"
-        "• `/cricket` — Live cricket scores\n"
-        "• `/convert [amt] [from] [to]` — Currency conversion\n"
-        "• `/agenda` — Google Calendar upcoming meetings\n"
-        "• `/briefing` — Trigger morning briefing\n"
-        "• `/speak [text]` — Synthesize neural voice note\n\n"
-        "💡 *You can also simply type or send voice memos in natural language!*"
-    )
+    user_id = update.effective_user.id
+    user_name = update.effective_user.first_name or "Friend"
+
+    if config.is_admin(user_id):
+        welcome_text = (
+            "🤖 **JARVIS Executive AI Assistant Online**\n\n"
+            "Welcome back, Revanth Sir! All master subsystems are operational.\n\n"
+            "**Master Workstation Commands:**\n"
+            "• `/device` or `/pc` — Workstation telemetry (CPU, RAM, Battery)\n"
+            "• `/screenshot` — Capture live desktop screen\n"
+            "• `/lock` — Lock computer workstation\n"
+            "• `/volume [action]` — PC Volume control (mute, up, down)\n"
+            "• `/clipboard [text]` — View or set PC clipboard\n"
+            "• `/vault` — Data Guardian database backup & integrity status\n\n"
+            "**Personal Assistant Commands:**\n"
+            "• `/tasks` — Manage your to-do list\n"
+            "• `/notes [query]` — Second Brain notes search\n"
+            "• `/books` — Track reading list and book page progress\n"
+            "• `/expenses` — View monthly expense ledger\n"
+            "• `/habits` — Habit streaks and daily check-ins\n"
+            "• `/weather [city]` — Live weather forecast\n"
+            "• `/cricket` — Live cricket scores\n"
+            "• `/convert [amt] [from] [to]` — Currency conversion\n"
+            "• `/agenda` — Google Calendar upcoming meetings\n"
+            "• `/briefing` — Trigger morning briefing\n"
+            "• `/speak [text]` — Synthesize neural voice note\n\n"
+            "💡 *You can also simply type or send voice memos in natural language!*"
+        )
+    else:
+        welcome_text = (
+            f"🤖 **Hello {user_name}! Welcome to your Personal AI Assistant**\n\n"
+            "I am ready to assist you with your daily tasks, spendings, notes, and English coaching!\n\n"
+            "**Your Personal Commands:**\n"
+            "• `/expenses` — Track your personal spendings\n"
+            "• `/tasks` — Manage your personal to-do list\n"
+            "• `/notes [query]` — Save and search personal notes\n"
+            "• `/books` — Track your reading list and page progress\n"
+            "• `/habits` — Track your daily habit streaks\n"
+            "• `/remind [mins] [message]` — Set personal reminders\n"
+            "• `/weather [city]` — Live weather forecast\n"
+            "• `/cricket` — Live cricket scores\n"
+            "• `/convert [amt] [from] [to]` — Currency exchange\n"
+            "• `/speak [text]` — Spoken voice reply\n\n"
+            "💡 *Feel free to type any question in natural language, practice English, or send voice notes!*"
+        )
     await send_rich_reply(update, welcome_text)
 
 @restricted
+@admin_only
 async def cmd_device(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = device_service.get_system_stats()
     text = (
@@ -182,6 +224,7 @@ async def cmd_device(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_rich_reply(update, text)
 
 @restricted
+@admin_only
 async def cmd_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📸 Capturing desktop screenshot...")
     try:
@@ -191,6 +234,7 @@ async def cmd_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Failed to capture screenshot: {e}")
 
 @restricted
+@admin_only
 async def cmd_lock(update: Update, context: ContextTypes.DEFAULT_TYPE):
     locked = device_service.lock_workstation()
     if locked:
@@ -199,12 +243,14 @@ async def cmd_lock(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Could not lock workstation (Non-Windows platform or permission denied).")
 
 @restricted
+@admin_only
 async def cmd_volume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = context.args[0] if context.args else "mute"
     res = device_service.set_volume(action)
     await update.message.reply_text(f"🔊 {res}")
 
 @restricted
+@admin_only
 async def cmd_clipboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         text = " ".join(context.args)
@@ -416,6 +462,7 @@ async def cmd_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_rich_reply(update, "\n".join(lines))
 
 @restricted
+@admin_only
 async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     backup_service.backup_all_databases()
     status = backup_service.get_vault_status()

@@ -132,7 +132,7 @@ def clean_jarvis_text(text: str) -> str:
     return text.strip()
 
 current_model_idx = 0
-chat_session = None
+chat_sessions = {}
 _last_date = None
 
 def get_current_model_name() -> str:
@@ -145,22 +145,72 @@ def get_dynamic_system_prompt() -> str:
     now = datetime.now(tz)
     date_str = now.strftime("%A, %B %d, %Y")
     time_str = now.strftime("%I:%M %p")
-    return SYSTEM_PROMPT + f"\nCURRENT DATE & TIME: Today is {date_str}. Current time is {time_str} IST.\nAlways use this as the accurate real-time date and time for all responses.\n"
+    user_id = config.get_current_user_id()
+    user_name = config.get_current_user_name()
 
-def init_chat_session():
-    global chat_session, _last_date
+    if config.is_admin(user_id):
+        persona = (
+            "You are JARVIS, an elite executive personal AI assistant.\n"
+            "Your executive user and master is Revanth Sir. Always address him with high respect as 'Revanth Sir'.\n"
+            "You are loyal, efficient, hyper-precise, proactive, and completely factual."
+        )
+    else:
+        persona = (
+            f"You are an intelligent, friendly, executive personal AI assistant and English coach.\n"
+            f"Your current user is {user_name}. Always address them politely and warmly by their name '{user_name}'.\n"
+            "Help them with tasks, expenses, notes, books, daily habits, reminders, and conversational English coaching."
+        )
+
+    return f"""{persona}
+
+ANTI-HALLUCINATION & FACTUAL GROUNDING PROTOCOL:
+1. NEVER guess, assume, or hallucinate dates, facts, calendar events, birthdays, expenses, books, or notes.
+2. CALENDAR & SCHEDULE: When asked about events, schedule, meetings, or birthdays, ALWAYS invoke `calendar_service.get_calendar_events`. Report only what is returned by the tool.
+3. EXPENSES & FINANCIALS: When asked about spendings, amounts, or receipts, ALWAYS query `get_expenses_by_date` or `get_monthly_summary`. Never guess numbers.
+4. REMINDERS & ALERTS: When asked to set a reminder or alarm, ALWAYS call `create_reminder`. Confirm the exact time and date.
+5. NOTES & MEMORY: When asked about anything previously noted or remembered, ALWAYS query `search_notes` or `list_notes`.
+6. LIVE REAL-TIME INFO: For stock prices, live news, or factual questions, ALWAYS call `search_web`.
+7. CRICKET: Always invoke `get_live_cricket_scores`.
+8. WEATHER: Always invoke `get_weather`.
+9. BOOKS & READING TRACKER: When asked about reading progress, books, or adding a new book to read, ALWAYS invoke `books_service` tools (`add_book`, `update_book_progress`, `list_books`, `search_books`). Never guess pages or reading status.
+10. If any information is not present in the database or search, clearly tell the user that the information is not logged yet. NEVER fabricate imaginary records.
+
+ENGLISH COMMUNICATION COACHING:
+1. You also serve as the user's executive English communication coach.
+2. If the user writes with minor grammar mistakes or colloquial phrasing, understand their request first, fulfill it, and offer a gentle, helpful English phrasing tip at the end (e.g. '💡 English phrasing: ...') when appropriate.
+3. When asked for English practice, grammar critique, or vocabulary expansion, provide encouraging, refined feedback.
+
+CRITICAL FORMATTING INSTRUCTIONS:
+1. NEVER output triple asterisks '***' or quadruple asterisks.
+2. Format lists with clean dots (•) or clean numbers (1., 2.).
+3. Avoid markdown clutter. Keep replies neat, crisp, and executive.
+
+DATA PRIVACY & STORAGE INSTRUCTIONS:
+1. Only store notes, tasks, habits, expenses, or books when the user EXPLICITLY asks to record, note, log, or track something.
+2. All data recorded belongs strictly to the active user.
+
+CURRENT DATE & TIME: Today is {date_str}. Current time is {time_str} IST.
+Always use this as the accurate real-time date and time for all responses.
+"""
+
+def get_or_create_chat_session(user_id: int):
+    global chat_sessions, _last_date
     from datetime import datetime
-    model_name = get_current_model_name()
-    model = genai.GenerativeModel(
-        model_name=model_name,
-        tools=tools_list,
-        system_instruction=get_dynamic_system_prompt()
-    )
-    chat_session = model.start_chat(enable_automatic_function_calling=True)
-    _last_date = datetime.now(config.get_tz()).date()
-    return chat_session
+    today = datetime.now(config.get_tz()).date()
+    if _last_date is None or today != _last_date:
+        chat_sessions.clear()
+        _last_date = today
 
-init_chat_session()
+    if user_id not in chat_sessions:
+        model_name = get_current_model_name()
+        model = genai.GenerativeModel(
+            model_name=model_name,
+            tools=tools_list,
+            system_instruction=get_dynamic_system_prompt()
+        )
+        chat_sessions[user_id] = model.start_chat(enable_automatic_function_calling=True)
+
+    return chat_sessions[user_id]
 
 def query_openai(prompt: str) -> str:
     """
@@ -193,22 +243,15 @@ def query_openai(prompt: str) -> str:
         return None
 
 def query_gemini_agent(prompt: str) -> str:
-    global current_model_idx, chat_session, _last_date
-    from datetime import datetime
-
-    # Refresh chat session if date has changed (keeps date accurate across midnight)
-    today = datetime.now(config.get_tz()).date()
-    if _last_date is None or today != _last_date:
-        chat_session = None
-
+    global current_model_idx, chat_sessions
+    user_id = config.get_current_user_id()
     attempts = 0
     max_attempts = len(MODELS_POOL)
 
     while attempts < max_attempts:
         try:
-            if chat_session is None:
-                init_chat_session()
-            response = chat_session.send_message(prompt)
+            session = get_or_create_chat_session(user_id)
+            response = session.send_message(prompt)
             return clean_jarvis_text(response.text)
         except Exception as e:
             err_str = str(e).lower()
@@ -216,14 +259,14 @@ def query_gemini_agent(prompt: str) -> str:
             if "quota" in err_str or "429" in err_str or "not found" in err_str or "404" in err_str or "resourceexhausted" in err_str:
                 logger.warning(f"Model {get_current_model_name()} hit quota/error. Switching to next model...")
                 current_model_idx = (current_model_idx + 1) % len(MODELS_POOL)
-                chat_session = None  # Reinitialize with new model
+                chat_sessions.clear()  # Reinitialize with new model
                 attempts += 1
                 continue
             else:
-                # Reset chat session on random error and try once more
                 try:
-                    init_chat_session()
-                    response = chat_session.send_message(prompt)
+                    chat_sessions.pop(user_id, None)
+                    session = get_or_create_chat_session(user_id)
+                    response = session.send_message(prompt)
                     return clean_jarvis_text(response.text)
                 except Exception as e2:
                     return f"Jarvis encountered an error: {e2}"

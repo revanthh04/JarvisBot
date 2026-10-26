@@ -13,27 +13,27 @@ DATABASES = {
     "expenses": {
         "file": os.path.join(BASE_DIR, "expenses.db"),
         "table": "expenses",
-        "columns": ["id", "amount", "category", "description", "expense_date", "created_at"]
+        "columns": ["id", "user_id", "amount", "category", "description", "expense_date", "created_at"]
     },
     "books": {
         "file": os.path.join(BASE_DIR, "books.db"),
         "table": "books",
-        "columns": ["id", "title", "author", "status", "current_page", "total_pages", "rating", "notes", "created_at", "updated_at"]
+        "columns": ["id", "user_id", "title", "author", "status", "current_page", "total_pages", "rating", "notes", "created_at", "updated_at"]
     },
     "notes": {
         "file": os.path.join(BASE_DIR, "notes.db"),
         "table": "notes",
-        "columns": ["id", "title", "content", "tags", "created_at"]
+        "columns": ["id", "user_id", "title", "content", "tags", "created_at"]
     },
     "tasks": {
         "file": os.path.join(BASE_DIR, "tasks.db"),
         "table": "tasks",
-        "columns": ["id", "title", "due_date", "completed", "created_at"]
+        "columns": ["id", "user_id", "title", "due_date", "completed", "created_at"]
     },
     "habits": {
         "file": os.path.join(BASE_DIR, "habits.db"),
         "table": "habits",
-        "columns": ["id", "name", "target_days", "created_at"]
+        "columns": ["id", "user_id", "name", "created_at"]
     },
     "reminders": {
         "file": os.path.join(BASE_DIR, "reminders.db"),

@@ -24,7 +24,7 @@ def init_db():
 
 init_db()
 
-def create_reminder(message: str, delay_minutes: int = 0, time_str: str = "") -> dict:
+def create_reminder(message: str, delay_minutes: int = 0, time_str: str = "", user_id: int = None) -> dict:
     """
     Creates a reminder.
     Either provide delay_minutes (e.g. 15 for 15 minutes from now)
@@ -69,7 +69,8 @@ def create_reminder(message: str, delay_minutes: int = 0, time_str: str = "") ->
     if not remind_dt:
         remind_dt = now + timedelta(minutes=10)
 
-    user_id = config.ALLOWED_USER_IDS[0] if config.ALLOWED_USER_IDS else 0
+    if user_id is None:
+        user_id = config.get_current_user_id()
     remind_iso = remind_dt.isoformat()
 
     conn = sqlite3.connect(DB_FILE)
@@ -81,6 +82,12 @@ def create_reminder(message: str, delay_minutes: int = 0, time_str: str = "") ->
     rem_id = c.lastrowid
     conn.commit()
     conn.close()
+
+    try:
+        import backup_service
+        backup_service.backup_all_databases()
+    except Exception:
+        pass
 
     formatted_time = remind_dt.strftime("%I:%M %p on %b %d")
     return {
@@ -113,10 +120,12 @@ def mark_reminder_triggered(reminder_id: int):
     conn.commit()
     conn.close()
 
-def list_active_reminders() -> list:
+def list_active_reminders(user_id: int = None) -> list:
+    if user_id is None:
+        user_id = config.get_current_user_id()
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT id, message, remind_at FROM reminders WHERE triggered = 0 ORDER BY remind_at ASC")
+    c.execute("SELECT id, message, remind_at FROM reminders WHERE user_id = ? AND triggered = 0 ORDER BY remind_at ASC", (user_id,))
     rows = c.fetchall()
     conn.close()
     return [{"id": r[0], "message": r[1], "remind_at": r[2]} for r in rows]
