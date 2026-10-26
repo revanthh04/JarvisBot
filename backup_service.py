@@ -23,12 +23,12 @@ DATABASES = {
     "notes": {
         "file": os.path.join(BASE_DIR, "notes.db"),
         "table": "notes",
-        "columns": ["id", "title", "content", "category", "created_at"]
+        "columns": ["id", "title", "content", "tags", "created_at"]
     },
     "tasks": {
         "file": os.path.join(BASE_DIR, "tasks.db"),
         "table": "tasks",
-        "columns": ["id", "description", "priority", "due_date", "completed", "created_at"]
+        "columns": ["id", "title", "due_date", "completed", "created_at"]
     },
     "habits": {
         "file": os.path.join(BASE_DIR, "habits.db"),
