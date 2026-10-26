@@ -76,8 +76,7 @@ def init_db():
 init_db()
 
 def log_expense(amount: float, category: str = "General", description: str = "", expense_date: str = None, user_id: int = None) -> dict:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     clean_date = normalize_expense_date(expense_date)
     try:
         amount_num = float(amount)
@@ -110,8 +109,7 @@ def log_expense(amount: float, category: str = "General", description: str = "",
     }
 
 def get_monthly_summary(month=None, year=None, user_id: int = None) -> dict:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     today = date.today()
     try:
         month_int = int(float(month)) if month else today.month
@@ -148,8 +146,7 @@ def get_monthly_summary(month=None, year=None, user_id: int = None) -> dict:
 
 def search_expenses(category: str = "", query: str = "", date_str: str = "", user_id: int = None) -> dict:
     """Search expenses by category (e.g. Food), text keyword, or specific date."""
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
@@ -190,8 +187,7 @@ def get_expenses_by_date(date_str: str = None, user_id: int = None) -> list:
     return search_expenses(date_str=norm_date, user_id=user_id).get("entries", [])
 
 def get_recent_expenses(limit: int = 10, user_id: int = None) -> list:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     try:
         limit = int(float(limit))
     except Exception:

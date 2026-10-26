@@ -38,7 +38,7 @@ DATABASES = {
     "reminders": {
         "file": os.path.join(BASE_DIR, "reminders.db"),
         "table": "reminders",
-        "columns": ["id", "user_id", "message", "remind_at", "triggered", "created_at"]
+        "columns": ["id", "user_id", "message", "remind_at", "triggered", "repeat_interval_minutes", "is_recurring", "last_triggered_at", "created_at"]
     }
 }
 

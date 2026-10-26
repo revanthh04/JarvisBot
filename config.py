@@ -33,6 +33,20 @@ def set_current_user(user_id: int, user_name: str = "User"):
 def get_current_user_id() -> int:
     return _current_user_id_var.get()
 
+def resolve_user_id(user_id: int = None) -> int:
+    curr = get_current_user_id()
+    if user_id is None:
+        return curr
+    try:
+        uid_int = int(user_id)
+        if uid_int < 100000:  # Telegram IDs are 8-10 digits; filter out LLM hallucinated IDs like 1 or 0
+            return curr
+        if is_authorized(uid_int):
+            return uid_int
+    except Exception:
+        pass
+    return curr
+
 def get_current_user_name() -> str:
     return _current_user_name_var.get()
 

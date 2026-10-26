@@ -28,8 +28,7 @@ def init_db():
 init_db()
 
 def add_note(content: str, title: str = "", tags: str = "", user_id: int = None) -> dict:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     if not title:
         title = content[:30] + ("..." if len(content) > 30 else "")
     conn = sqlite3.connect(DB_FILE)
@@ -46,8 +45,7 @@ def add_note(content: str, title: str = "", tags: str = "", user_id: int = None)
     return {"id": note_id, "title": title, "content": content, "tags": tags}
 
 def search_notes(query: str, user_id: int = None) -> list:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     search = f"%{query}%"
@@ -61,8 +59,7 @@ def search_notes(query: str, user_id: int = None) -> list:
     return [{"id": r[0], "title": r[1], "content": r[2], "tags": r[3], "created_at": r[4]} for r in rows]
 
 def list_notes(limit: int = 10, user_id: int = None) -> list:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("SELECT id, title, content, tags, created_at FROM notes WHERE user_id = ? ORDER BY created_at DESC LIMIT ?", (user_id, limit))
@@ -71,8 +68,7 @@ def list_notes(limit: int = 10, user_id: int = None) -> list:
     return [{"id": r[0], "title": r[1], "content": r[2], "tags": r[3], "created_at": r[4]} for r in rows]
 
 def delete_note(note_id, user_id: int = None) -> bool:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     try:
         note_id = int(float(note_id))
     except Exception:

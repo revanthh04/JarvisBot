@@ -388,20 +388,43 @@ async def cmd_agenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @restricted
 async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
-    if len(args) >= 2 and args[0].isdigit():
+    if not args:
+        active = reminders_service.list_active_reminders()
+        if not active:
+            await send_rich_reply(update, "⏰ No active reminders.\n\nSet one by saying: *'Remind me every 20 mins to drink water'* or use:\n• `/remind 15 Call client` (one-time)\n• `/remind every 20 Drink water` (recurring)\n• `/remind stop water` (to stop)")
+        else:
+            lines = ["⏰ **Active Scheduled Reminders:**"]
+            for r in active:
+                rec_badge = f" *(Repeats every {r['repeat_interval_minutes']} mins)*" if r.get('is_recurring') else ""
+                lines.append(f"• **[#{r['id']}] {r['message']}**\n  Next: {r['remind_at']}{rec_badge}")
+            lines.append("\n_Tip: Tell YoBot 'stop <reminder>' or use `/remind stop <name>` to cancel._")
+            await send_rich_reply(update, "\n".join(lines))
+        return
+
+    sub = args[0].lower()
+    if sub in ["stop", "cancel"]:
+        keyword = " ".join(args[1:]) if len(args) > 1 else ""
+        res = reminders_service.stop_recurring_reminders(keyword=keyword)
+        await send_rich_reply(update, f"⏰ {res['status_message']}")
+    elif sub in ["delete", "del", "remove"] and len(args) >= 2 and args[1].isdigit():
+        rem_id = int(args[1])
+        res = reminders_service.delete_reminder(reminder_id=rem_id)
+        await send_rich_reply(update, f"⏰ {res['status_message']}")
+    elif sub == "every" and len(args) >= 3 and args[1].isdigit():
+        mins = int(args[1])
+        msg = " ".join(args[2:])
+        res = reminders_service.create_reminder(message=msg, repeat_interval_minutes=mins, is_recurring=True)
+        await send_rich_reply(update, f"⏰ {res['status']}")
+    elif len(args) >= 2 and args[0].isdigit():
         mins = int(args[0])
         msg = " ".join(args[1:])
         res = reminders_service.create_reminder(message=msg, delay_minutes=mins)
         await send_rich_reply(update, f"⏰ {res['status']}")
     else:
-        active = reminders_service.list_active_reminders()
-        if not active:
-            await send_rich_reply(update, "⏰ No active reminders. Tell YoBot: *'Remind me in 15 minutes to call client'* or use `/remind 15 Call client`.")
-        else:
-            lines = ["⏰ **Active Scheduled Reminders:**"]
-            for r in active:
-                lines.append(f"• **{r['remind_at']}**: {r['message']}")
-            await send_rich_reply(update, "\n".join(lines))
+        # Pass the full text to create_reminder natural language parser
+        raw_text = " ".join(args)
+        res = reminders_service.create_reminder(message=raw_text)
+        await send_rich_reply(update, f"⏰ {res['status']}")
 
 @restricted
 async def cmd_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -515,12 +538,28 @@ async def send_briefing_to_user(context: ContextTypes.DEFAULT_TYPE, user_id: int
 async def check_reminders_job(context: ContextTypes.DEFAULT_TYPE):
     due = reminders_service.get_due_reminders()
     for rem in due:
-        reminders_service.mark_reminder_triggered(rem["id"])
-        msg = f"⏰ <b>REMINDER FOR REVANTH SIR</b>\n\n• {rem['message']}"
+        rem_id = rem["id"]
+        is_rec = rem.get("is_recurring", False)
+        interval = rem.get("repeat_interval_minutes", 0)
+        user_id = rem["user_id"]
+        recipient_title = "REVANTH SIR" if config.is_admin(user_id) else "YOU"
+
+        if is_rec and interval > 0:
+            next_time = reminders_service.reschedule_recurring_reminder(rem_id, interval)
+            msg = (
+                f"⏰ <b>RECURRING REMINDER FOR {recipient_title}</b>\n\n"
+                f"• {rem['message']}\n\n"
+                f"<i>(Repeats every {interval} mins • Next reminder at {next_time})\n"
+                f"To stop: tell YoBot 'stop {rem['message']}' or send /remind stop</i>"
+            )
+        else:
+            reminders_service.mark_reminder_triggered(rem_id)
+            msg = f"⏰ <b>REMINDER FOR {recipient_title}</b>\n\n• {rem['message']}"
+
         try:
-            await context.bot.send_message(chat_id=rem["user_id"], text=msg, parse_mode=ParseMode.HTML)
+            await context.bot.send_message(chat_id=user_id, text=msg, parse_mode=ParseMode.HTML)
         except Exception as e:
-            logger.error(f"Failed to send reminder {rem['id']}: {e}")
+            logger.error(f"Failed to send reminder {rem_id} to user {user_id}: {e}")
 
 # Scheduled Jobs
 async def scheduled_morning_briefing(context: ContextTypes.DEFAULT_TYPE):

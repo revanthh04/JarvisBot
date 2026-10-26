@@ -35,8 +35,7 @@ def init_db():
 init_db()
 
 def add_habit(name: str, user_id: int = None) -> dict:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     name = name.strip()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -61,8 +60,7 @@ def add_habit(name: str, user_id: int = None) -> dict:
     return res
 
 def log_habit(name: str, log_date: str = None, user_id: int = None) -> dict:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     if not log_date:
         log_date = date.today().isoformat()
     conn = sqlite3.connect(DB_FILE)
@@ -92,8 +90,7 @@ def log_habit(name: str, log_date: str = None, user_id: int = None) -> dict:
     return res
 
 def get_habit_streaks(user_id: int = None) -> list:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("SELECT id, name FROM habits WHERE user_id = ?", (user_id,))

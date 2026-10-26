@@ -28,8 +28,7 @@ def init_db():
 init_db()
 
 def add_task(title: str, due_date: str = None, user_id: int = None) -> dict:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("INSERT INTO tasks (user_id, title, due_date) VALUES (?, ?, ?)", (user_id, title.strip(), due_date))
@@ -44,8 +43,7 @@ def add_task(title: str, due_date: str = None, user_id: int = None) -> dict:
     return {"id": task_id, "title": title.strip(), "due_date": due_date, "completed": False}
 
 def list_tasks(completed: bool = False, user_id: int = None) -> list:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     if completed is None:
@@ -57,8 +55,7 @@ def list_tasks(completed: bool = False, user_id: int = None) -> list:
     return [{"id": r[0], "title": r[1], "due_date": r[2], "completed": bool(r[3]), "created_at": r[4]} for r in rows]
 
 def complete_task(task_id, user_id: int = None) -> bool:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     try:
         task_id = int(float(task_id))
     except Exception:
@@ -77,8 +74,7 @@ def complete_task(task_id, user_id: int = None) -> bool:
     return affected
 
 def delete_task(task_id, user_id: int = None) -> bool:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     try:
         task_id = int(float(task_id))
     except Exception:

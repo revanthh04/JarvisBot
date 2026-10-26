@@ -12,7 +12,7 @@ print("     YoBot COMPREHENSIVE DIAGNOSTIC TEST SUITE    ")
 print("==================================================")
 
 tests_passed = 0
-total_tests = 16
+total_tests = 17
 
 def run_test(num, name, fn):
     global tests_passed
@@ -173,6 +173,51 @@ def test_data_guardian():
     status = backup_service.get_vault_status()
     assert status["vault_records"] >= 2
 
+# 17. Recurring Reminders & Auto-Reschedule Engine
+def test_recurring_reminders():
+    import reminders_service
+    import sqlite3
+    from datetime import datetime, timedelta
+    import config
+
+    # Create recurring reminder
+    rem = reminders_service.create_reminder("Drink water every 20 mins")
+    assert rem["id"] > 0
+    assert rem["is_recurring"] is True
+    assert rem["repeat_interval_minutes"] == 20
+
+    # Advance time to simulate due trigger
+    tz = config.get_tz()
+    past_iso = (datetime.now(tz) - timedelta(minutes=1)).isoformat()
+    conn = sqlite3.connect(reminders_service.DB_FILE)
+    conn.execute("UPDATE reminders SET remind_at = ? WHERE id = ?", (past_iso, rem["id"]))
+    conn.commit()
+    conn.close()
+
+    # Query due reminders
+    due = reminders_service.get_due_reminders()
+    target = next((r for r in due if r["id"] == rem["id"]), None)
+    assert target is not None
+    assert target["is_recurring"] is True
+    assert target["repeat_interval_minutes"] == 20
+
+    # Test auto-reschedule
+    next_time = reminders_service.reschedule_recurring_reminder(rem["id"], 20)
+    assert next_time is not None
+
+    # Verify it is active and rescheduled into the future
+    active = reminders_service.list_active_reminders()
+    act_target = next((r for r in active if r["id"] == rem["id"]), None)
+    assert act_target is not None
+    assert act_target["is_recurring"] is True
+
+    # Test stop keyword
+    stop_res = reminders_service.stop_recurring_reminders("water")
+    assert stop_res["success"] is True
+
+    # Delete synthetic reminder
+    reminders_service.delete_reminder(rem["id"])
+
 if __name__ == "__main__":
     run_test(1, "Config & Whitelist Authorization", test_config)
     run_test(2, "Notes SQLite Second Brain", test_notes)
@@ -190,6 +235,7 @@ if __name__ == "__main__":
     run_test(14, "Books & Reading Tracker Subsystem", test_books)
     run_test(15, "Dual-Brain OpenAI/Gemini Hybrid Failover", test_dual_brain)
     run_test(16, "Data Guardian Vault & Auto-Persistence", test_data_guardian)
+    run_test(17, "Recurring Reminders Auto-Rescheduling Engine", test_recurring_reminders)
 
     print("==================================================")
     print(f"RESULTS: {tests_passed}/{total_tests} Subsystems Verified Successfully!")

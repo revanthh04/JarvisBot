@@ -33,8 +33,7 @@ def init_db():
 init_db()
 
 def add_book(title: str, author: str = "", status: str = "Reading", notes: str = "", total_pages: int = 0, user_id: int = None) -> dict:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     try:
         total_pages = int(float(total_pages))
     except Exception:
@@ -67,8 +66,7 @@ def add_book(title: str, author: str = "", status: str = "Reading", notes: str =
     }
 
 def update_book_progress(title: str, current_page: int, notes: str = "", status: str = "", user_id: int = None) -> dict:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     try:
         current_page = int(float(current_page))
     except Exception:
@@ -110,8 +108,7 @@ def update_book_progress(title: str, current_page: int, notes: str = "", status:
     }
 
 def list_books(status: str = "", user_id: int = None) -> list:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     if status and status.strip():
@@ -133,8 +130,7 @@ def list_books(status: str = "", user_id: int = None) -> list:
     } for r in rows]
 
 def search_books(query: str, user_id: int = None) -> list:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    user_id = config.resolve_user_id(user_id)
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     q = f"%{query.strip().lower()}%"

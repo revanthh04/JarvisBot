@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import re
 from datetime import datetime, timedelta
 import pytz
 import config
@@ -16,23 +17,94 @@ def init_db():
             message TEXT NOT NULL,
             remind_at TEXT NOT NULL,
             triggered BOOLEAN DEFAULT 0,
+            repeat_interval_minutes INTEGER DEFAULT 0,
+            is_recurring BOOLEAN DEFAULT 0,
+            last_triggered_at TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Check for missing columns in case of existing table
+    c.execute("PRAGMA table_info(reminders)")
+    cols = [col[1] for col in c.fetchall()]
+    if "repeat_interval_minutes" not in cols:
+        c.execute("ALTER TABLE reminders ADD COLUMN repeat_interval_minutes INTEGER DEFAULT 0")
+    if "is_recurring" not in cols:
+        c.execute("ALTER TABLE reminders ADD COLUMN is_recurring BOOLEAN DEFAULT 0")
+    if "last_triggered_at" not in cols:
+        c.execute("ALTER TABLE reminders ADD COLUMN last_triggered_at TEXT")
     conn.commit()
     conn.close()
 
 init_db()
 
-def create_reminder(message: str, delay_minutes: int = 0, time_str: str = "", user_id: int = None) -> dict:
+def _clean_reminder_message(raw_msg: str) -> str:
+    msg = raw_msg.strip()
+    # Strip common leading conversational phrases
+    patterns_strip = [
+        r'^(?:so\s+)?(?:from\s+here\s+on\s+(?:words|out)\s+)?remind\s+(?:me\s+)?(?:to\s+|for\s+)?',
+        r'^remind\s+(?:me\s+)?(?:to\s+|for\s+)?',
+        r'^please\s+remind\s+(?:me\s+)?(?:to\s+|for\s+)?',
+    ]
+    for p in patterns_strip:
+        msg = re.sub(p, '', msg, flags=re.IGNORECASE).strip()
+
+    # Strip trailing recurring interval mentions like 'for every 20 mins', 'every 20 minutes', 'every hour'
+    msg = re.sub(r'(?:\s+for)?\s+every\s+\d+\s*(?:minutes?|mins?|m|hours?|hrs?|h|days?)', '', msg, flags=re.IGNORECASE).strip()
+    msg = re.sub(r'(?:\s+for)?\s+every\s+(?:hour|half(?:\s+an)?\s+hour|day)', '', msg, flags=re.IGNORECASE).strip()
+    msg = re.sub(r'\s+daily\b', '', msg, flags=re.IGNORECASE).strip()
+
+    if not msg:
+        msg = raw_msg.strip()
+    # Capitalize first letter
+    return msg[0].upper() + msg[1:] if len(msg) > 1 else msg.upper()
+
+def create_reminder(
+    message: str,
+    delay_minutes: int = 0,
+    time_str: str = "",
+    repeat_interval_minutes: int = 0,
+    is_recurring: bool = False,
+    user_id: int = None
+) -> dict:
     """
-    Creates a reminder.
-    Either provide delay_minutes (e.g. 15 for 15 minutes from now)
-    OR provide time_str (e.g. '13:20', '1:20 PM', 'in 15 minutes', '1 hour')
+    Creates a one-time or recurring reminder.
+    
+    Parameters:
+    - message: Content to remind about (e.g., 'Drink water', 'Team sync').
+    - delay_minutes: Delay until first reminder in minutes.
+    - time_str: Natural language time string (e.g. 'in 20 mins', 'every 20 mins', '14:30', 'every hour').
+    - repeat_interval_minutes: If > 0, reminder will automatically reschedule and repeat indefinitely every N minutes until stopped.
+    - is_recurring: Explicit flag for recurring reminders.
     """
-    import re
     tz = config.get_tz()
     now = datetime.now(tz)
+    combined_search_text = f"{message} {time_str}".lower()
+
+    # Detect interval pattern in message or time_str
+    detected_interval = 0
+    match_rec_min = re.search(r'every\s+(\d+)\s*(?:minutes?|mins?|m)', combined_search_text)
+    match_rec_hr = re.search(r'every\s+(\d+)\s*(?:hours?|hrs?|h)', combined_search_text)
+    match_rec_every_hr = re.search(r'every\s+hour', combined_search_text)
+    match_rec_half_hr = re.search(r'every\s+half(?:\s+an)?\s+hour', combined_search_text)
+    match_rec_daily = re.search(r'daily|every\s+day', combined_search_text)
+
+    if match_rec_min:
+        detected_interval = int(match_rec_min.group(1))
+    elif match_rec_hr:
+        detected_interval = int(match_rec_hr.group(1)) * 60
+    elif match_rec_half_hr:
+        detected_interval = 30
+    elif match_rec_every_hr:
+        detected_interval = 60
+    elif match_rec_daily:
+        detected_interval = 1440
+
+    if detected_interval > 0:
+        is_recurring = True
+        repeat_interval_minutes = detected_interval
+
+    if repeat_interval_minutes > 0:
+        is_recurring = True
 
     remind_dt = None
 
@@ -40,15 +112,13 @@ def create_reminder(message: str, delay_minutes: int = 0, time_str: str = "", us
         remind_dt = now + timedelta(minutes=delay_minutes)
     elif time_str:
         time_clean = time_str.strip().lower()
-        
-        # Check for relative minutes: e.g. "in 15 mins", "15 minutes", "10m"
         match_min = re.search(r'(\d+)\s*(?:m|min|minute|minutes)', time_clean)
         match_hr = re.search(r'(\d+)\s*(?:h|hr|hour|hours)', time_clean)
-        
-        if match_hr:
+
+        if match_hr and not match_rec_hr:
             hrs = int(match_hr.group(1))
             remind_dt = now + timedelta(hours=hrs)
-        elif match_min:
+        elif match_min and not match_rec_min:
             mins = int(match_min.group(1))
             remind_dt = now + timedelta(minutes=mins)
         else:
@@ -66,19 +136,23 @@ def create_reminder(message: str, delay_minutes: int = 0, time_str: str = "", us
                 except ValueError:
                     continue
 
+    # If recurring and no specific first time specified, first trigger fires in repeat_interval_minutes
     if not remind_dt:
-        remind_dt = now + timedelta(minutes=10)
+        if is_recurring and repeat_interval_minutes > 0:
+            remind_dt = now + timedelta(minutes=repeat_interval_minutes)
+        else:
+            remind_dt = now + timedelta(minutes=10)
 
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    clean_msg = _clean_reminder_message(message)
+    user_id = config.resolve_user_id(user_id)
     remind_iso = remind_dt.isoformat()
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""
-        INSERT INTO reminders (user_id, message, remind_at, triggered)
-        VALUES (?, ?, ?, 0)
-    """, (user_id, message.strip(), remind_iso))
+        INSERT INTO reminders (user_id, message, remind_at, triggered, repeat_interval_minutes, is_recurring)
+        VALUES (?, ?, ?, 0, ?, ?)
+    """, (user_id, clean_msg, remind_iso, repeat_interval_minutes, 1 if is_recurring else 0))
     rem_id = c.lastrowid
     conn.commit()
     conn.close()
@@ -89,43 +163,196 @@ def create_reminder(message: str, delay_minutes: int = 0, time_str: str = "", us
     except Exception:
         pass
 
-    formatted_time = remind_dt.strftime("%I:%M %p on %b %d")
+    formatted_time = remind_dt.strftime("%I:%M %p")
+    if is_recurring:
+        status_text = (
+            f"Recurring reminder active for '{clean_msg}'. "
+            f"Next reminder at {formatted_time}, repeating every {repeat_interval_minutes} minutes."
+        )
+    else:
+        status_text = f"Reminder set for '{clean_msg}' at {formatted_time}."
+
     return {
         "id": rem_id,
-        "message": message,
+        "message": clean_msg,
         "remind_at": formatted_time,
-        "status": f"Reminder set for '{message}' at {formatted_time}."
+        "is_recurring": is_recurring,
+        "repeat_interval_minutes": repeat_interval_minutes,
+        "status": status_text
     }
 
 def get_due_reminders() -> list:
+    """
+    Returns all reminders that are due to trigger right now.
+    """
     tz = config.get_tz()
     now_iso = datetime.now(tz).isoformat()
 
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""
-        SELECT id, user_id, message, remind_at
+        SELECT id, user_id, message, remind_at, repeat_interval_minutes, is_recurring, last_triggered_at
         FROM reminders
         WHERE triggered = 0 AND remind_at <= ?
     """, (now_iso,))
     rows = c.fetchall()
     conn.close()
 
-    return [{"id": r[0], "user_id": r[1], "message": r[2], "remind_at": r[3]} for r in rows]
+    return [
+        {
+            "id": r[0],
+            "user_id": r[1],
+            "message": r[2],
+            "remind_at": r[3],
+            "repeat_interval_minutes": r[4] or 0,
+            "is_recurring": bool(r[5]),
+            "last_triggered_at": r[6]
+        }
+        for r in rows
+    ]
 
-def mark_reminder_triggered(reminder_id: int):
+def reschedule_recurring_reminder(reminder_id: int, interval_minutes: int) -> str:
+    """
+    Advances a recurring reminder to trigger again after interval_minutes.
+    Keeps triggered=0 so it repeats indefinitely.
+    """
+    tz = config.get_tz()
+    now = datetime.now(tz)
+    next_remind_dt = now + timedelta(minutes=interval_minutes)
+    next_remind_iso = next_remind_dt.isoformat()
+    now_iso = now.isoformat()
+
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("UPDATE reminders SET triggered = 1 WHERE id = ?", (reminder_id,))
+    c.execute("""
+        UPDATE reminders 
+        SET remind_at = ?, last_triggered_at = ?, triggered = 0
+        WHERE id = ?
+    """, (next_remind_iso, now_iso, reminder_id))
     conn.commit()
     conn.close()
 
-def list_active_reminders(user_id: int = None) -> list:
-    if user_id is None:
-        user_id = config.get_current_user_id()
+    return next_remind_dt.strftime("%I:%M %p")
+
+def mark_reminder_triggered(reminder_id: int):
+    """
+    Marks a one-time reminder as triggered so it will not fire again.
+    """
+    tz = config.get_tz()
+    now_iso = datetime.now(tz).isoformat()
+
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT id, message, remind_at FROM reminders WHERE user_id = ? AND triggered = 0 ORDER BY remind_at ASC", (user_id,))
+    c.execute("UPDATE reminders SET triggered = 1, last_triggered_at = ? WHERE id = ?", (now_iso, reminder_id))
+    conn.commit()
+    conn.close()
+
+def stop_recurring_reminders(keyword: str = "", user_id: int = None) -> dict:
+    """
+    Stops/disables recurring reminders.
+    If keyword is provided (e.g. 'water'), stops recurring reminders matching that keyword.
+    If keyword is empty or 'all', stops all recurring reminders for the active user.
+    """
+    user_id = config.resolve_user_id(user_id)
+
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    if keyword and keyword.strip().lower() != "all":
+        search_kw = f"%{keyword.strip().lower()}%"
+        c.execute("""
+            UPDATE reminders 
+            SET triggered = 1 
+            WHERE user_id = ? AND triggered = 0 AND is_recurring = 1 AND LOWER(message) LIKE ?
+        """, (user_id, search_kw))
+    else:
+        c.execute("""
+            UPDATE reminders 
+            SET triggered = 1 
+            WHERE user_id = ? AND triggered = 0 AND is_recurring = 1
+        """, (user_id,))
+    
+    rows_affected = c.rowcount
+    conn.commit()
+    conn.close()
+
+    try:
+        import backup_service
+        backup_service.backup_all_databases()
+    except Exception:
+        pass
+
+    target_str = f"'{keyword}'" if keyword and keyword != "all" else "all"
+    if rows_affected > 0:
+        return {
+            "success": True,
+            "count": rows_affected,
+            "status_message": f"Successfully stopped {rows_affected} recurring reminder(s) for {target_str}."
+        }
+    else:
+        return {
+            "success": False,
+            "count": 0,
+            "status_message": f"No active recurring reminders found matching {target_str}."
+        }
+
+def delete_reminder(reminder_id: int, user_id: int = None) -> dict:
+    """
+    Deletes a reminder by ID.
+    """
+    user_id = config.resolve_user_id(user_id)
+
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("DELETE FROM reminders WHERE id = ? AND user_id = ?", (reminder_id, user_id))
+    rows_affected = c.rowcount
+    conn.commit()
+    conn.close()
+
+    try:
+        import backup_service
+        backup_service.backup_all_databases()
+    except Exception:
+        pass
+
+    if rows_affected > 0:
+        return {"success": True, "status_message": f"Reminder #{reminder_id} deleted."}
+    return {"success": False, "status_message": f"Reminder #{reminder_id} not found."}
+
+def list_active_reminders(user_id: int = None) -> list:
+    """
+    Lists all currently active (untriggered) reminders for the user.
+    """
+    user_id = config.resolve_user_id(user_id)
+
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, message, remind_at, repeat_interval_minutes, is_recurring
+        FROM reminders 
+        WHERE user_id = ? AND triggered = 0 
+        ORDER BY remind_at ASC
+    """, (user_id,))
     rows = c.fetchall()
     conn.close()
-    return [{"id": r[0], "message": r[1], "remind_at": r[2]} for r in rows]
+
+    result = []
+    tz = config.get_tz()
+    for r in rows:
+        rem_id, msg, r_at, interval, is_rec = r
+        try:
+            dt = datetime.fromisoformat(r_at)
+            formatted = dt.strftime("%I:%M %p on %b %d")
+        except Exception:
+            formatted = r_at
+
+        recurrence_desc = f"Repeats every {interval} mins" if is_rec and interval > 0 else "One-time"
+        result.append({
+            "id": rem_id,
+            "message": msg,
+            "remind_at": formatted,
+            "raw_remind_at": r_at,
+            "is_recurring": bool(is_rec),
+            "repeat_interval_minutes": interval or 0,
+            "recurrence": recurrence_desc
+        })
+    return result

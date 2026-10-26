@@ -32,12 +32,16 @@ if config.OPENAI_API_KEY:
 
 # Pool of available models in priority order for seamless quota fallback
 MODELS_POOL = [
-    "gemini-3.5-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-flash-latest",
+    "gemini-2.5-flash-lite",
+    "gemini-3.7-flash",
     "gemini-flash-lite-latest",
+    "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
-    "gemini-3.8-flash"
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash"
 ]
 
 tools_list = [
@@ -82,6 +86,8 @@ tools_list = [
     # Proactive Reminders
     reminders_service.create_reminder,
     reminders_service.list_active_reminders,
+    reminders_service.stop_recurring_reminders,
+    reminders_service.delete_reminder,
     # Books & Reading Tracker Subsystem
     books_service.add_book,
     books_service.update_book_progress,
@@ -97,7 +103,7 @@ ANTI-HALLUCINATION & FACTUAL GROUNDING PROTOCOL:
 1. NEVER guess, assume, or hallucinate dates, facts, calendar events, birthdays, expenses, books, or notes.
 2. CALENDAR & SCHEDULE: When asked about events, schedule, meetings, or birthdays, ALWAYS invoke `calendar_service.get_calendar_events`. Report only what is returned by the tool.
 3. EXPENSES & FINANCIALS: When asked about spendings, amounts, or receipts, ALWAYS query `get_expenses_by_date` or `get_monthly_summary`. Never guess numbers.
-4. REMINDERS & ALERTS: When asked to set a reminder or alarm, ALWAYS call `create_reminder`. Confirm the exact time and date.
+4. REMINDERS & RECURRING ALERTS: When asked to set a reminder or alarm, ALWAYS call `create_reminder`. If it repeats (e.g. 'every 20 mins', 'every hour', 'daily', 'every day'), set `repeat_interval_minutes` (e.g. 20) and `is_recurring=True`. When asked to stop or cancel reminders (e.g. 'stop water reminder', 'cancel reminder'), ALWAYS invoke `stop_recurring_reminders` or `delete_reminder`. Always report exact times and recurrence intervals.
 5. NOTES & MEMORY: When asked about anything previously noted or remembered, ALWAYS query `search_notes` or `list_notes`.
 6. LIVE REAL-TIME INFO: For stock prices, live news, or factual questions, ALWAYS call `search_web`.
 7. CRICKET: Always invoke `get_live_cricket_scores`.
@@ -167,7 +173,7 @@ ANTI-HALLUCINATION & FACTUAL GROUNDING PROTOCOL:
 1. NEVER guess, assume, or hallucinate dates, facts, calendar events, birthdays, expenses, books, or notes.
 2. CALENDAR & SCHEDULE: When asked about events, schedule, meetings, or birthdays, ALWAYS invoke `calendar_service.get_calendar_events`. Report only what is returned by the tool.
 3. EXPENSES & FINANCIALS: When asked about spendings, amounts, or receipts, ALWAYS query `get_expenses_by_date` or `get_monthly_summary`. Never guess numbers.
-4. REMINDERS & ALERTS: When asked to set a reminder or alarm, ALWAYS call `create_reminder`. Confirm the exact time and date.
+4. REMINDERS & RECURRING ALERTS: When asked to set a reminder or alarm, ALWAYS call `create_reminder`. If it repeats (e.g. 'every 20 mins', 'every hour', 'daily', 'every day'), set `repeat_interval_minutes` (e.g. 20) and `is_recurring=True`. When asked to stop or cancel reminders (e.g. 'stop water reminder', 'cancel reminder'), ALWAYS invoke `stop_recurring_reminders` or `delete_reminder`. Always report exact times and recurrence intervals.
 5. NOTES & MEMORY: When asked about anything previously noted or remembered, ALWAYS query `search_notes` or `list_notes`.
 6. LIVE REAL-TIME INFO: For stock prices, live news, or factual questions, ALWAYS call `search_web`.
 7. CRICKET: Always invoke `get_live_cricket_scores`.
@@ -281,7 +287,8 @@ def query_agent(prompt: str) -> str:
     - If OpenAI is exhausted or fails, falls back instantly to Gemini pool without user interruption.
     """
     action_keywords = [
-        "expense", "spent", "spend", "remind", "weather", "cricket",
+        "expense", "spent", "spend", "remind", "reminder", "reminders", "alarm",
+        "repeat", "recurring", "stop reminder", "water", "weather", "cricket",
         "calendar", "event", "birthday", "bday", "book", "reading", "page",
         "task", "habit", "lock", "clipboard", "volume", "battery",
         "system stats", "screenshot", "currency", "emi", "email"

@@ -73,10 +73,10 @@ except Exception as e:
     log_param(2, "Render Cloud 24/7 Keep-Alive", False, str(e))
 
 # ------------------------------------------------------------------
-# Parameter 3: Reminders Subsystem (Add -> Check -> Trigger Test -> Clean)
+# Parameter 3: Reminders Subsystem (One-Shot & Recurring Auto-Reschedule)
 # ------------------------------------------------------------------
 try:
-    # 1. Add synthetic reminder
+    # 1. Add synthetic one-shot reminder
     rem = reminders_service.create_reminder(message="QA Test: Drink water & review metrics", delay_minutes=1)
     rem_id = rem["id"]
     
@@ -85,7 +85,6 @@ try:
     found_active = any(r["id"] == rem_id for r in active)
     
     # 3. Simulate due trigger test
-    # Temporarily set remind_at to 1 minute ago to test trigger query
     past_iso = (datetime.now(config.get_tz()) - timedelta(minutes=1)).isoformat()
     conn = sqlite3.connect(reminders_service.DB_FILE)
     conn.execute("UPDATE reminders SET remind_at = ? WHERE id = ?", (past_iso, rem_id))
@@ -100,15 +99,36 @@ try:
     active_after = reminders_service.list_active_reminders()
     not_in_active = not any(r["id"] == rem_id for r in active_after)
     
-    # 5. Clean up test reminder
+    # 5. Clean up one-shot test reminder
+    reminders_service.delete_reminder(rem_id)
+
+    # 6. Test Recurring Reminder Engine (e.g. 'every 20 mins')
+    rec_rem = reminders_service.create_reminder(message="QA Recurring: Drink water every 20 mins")
+    rec_id = rec_rem["id"]
+    is_rec_valid = rec_rem["is_recurring"] and rec_rem["repeat_interval_minutes"] == 20
+
+    # Simulate due and auto-reschedule
     conn = sqlite3.connect(reminders_service.DB_FILE)
-    conn.execute("DELETE FROM reminders WHERE id = ?", (rem_id,))
+    conn.execute("UPDATE reminders SET remind_at = ? WHERE id = ?", (past_iso, rec_id))
     conn.commit()
     conn.close()
-    
-    success = found_active and found_due and not_in_active
-    log_param(3, "Reminders Lifecycle (Add/Check/Due/Trigger/Clean)", success, 
-              f"Added ID #{rem_id}, verified active, verified due trigger detection, marked triggered, and cleaned.")
+
+    due_rec = reminders_service.get_due_reminders()
+    found_rec_due = any(r["id"] == rec_id and r["is_recurring"] for r in due_rec)
+    resched_time = reminders_service.reschedule_recurring_reminder(rec_id, 20)
+
+    # Check it remains active with future timestamp
+    active_rec = reminders_service.list_active_reminders()
+    still_active = any(r["id"] == rec_id and r["is_recurring"] for r in active_rec)
+
+    # Stop recurring reminder
+    stop_res = reminders_service.stop_recurring_reminders(keyword="QA Recurring")
+    reminders_service.delete_reminder(rec_id)
+
+    success = (found_active and found_due and not_in_active and 
+               is_rec_valid and found_rec_due and still_active and stop_res["success"])
+    log_param(3, "Reminders Engine (One-Shot & Recurring Auto-Rescheduling)", success, 
+              f"Verified one-shot trigger, verified recurring 20-min parsing, auto-rescheduling (next at {resched_time}), and keyword cancellation.")
 except Exception as e:
     log_param(3, "Reminders Lifecycle", False, str(e))
 
