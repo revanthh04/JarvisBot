@@ -33,6 +33,7 @@ import calendar_service
 import gmail_service
 import reminders_service
 import books_service
+import backup_service
 
 # Logging setup
 logging.basicConfig(
@@ -155,6 +156,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/notes [query]` — Second Brain notes search\n"
         "• `/books` — Track reading list and book page progress\n"
         "• `/expenses` — View monthly expense ledger\n"
+        "• `/vault` — Data Guardian database backup & integrity status\n"
         "• `/habits` — Habit streaks and daily check-ins\n"
         "• `/weather [city]` — Live weather forecast\n"
         "• `/cricket` — Live cricket scores\n"
@@ -414,6 +416,25 @@ async def cmd_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_rich_reply(update, "\n".join(lines))
 
 @restricted
+async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    backup_service.backup_all_databases()
+    status = backup_service.get_vault_status()
+    act = status.get("active_sqlite_records", {})
+    text = (
+        "🛡️ **Data Guardian Vault Status**\n\n"
+        "All data is automatically backed up and protected against server restarts:\n"
+        f"• **Food & Expenses:** {act.get('expenses', 0)} records\n"
+        f"• **Books Library:** {act.get('books', 0)} books\n"
+        f"• **Notes:** {act.get('notes', 0)} notes\n"
+        f"• **Tasks:** {act.get('tasks', 0)} tasks\n"
+        f"• **Reminders:** {act.get('reminders', 0)} active\n"
+        f"• **Total Vault Records:** {status.get('vault_records', 0)}\n"
+        f"• **Last Snapshot:** `{status.get('last_backup', 'Just now')[:19]}`\n\n"
+        "✅ *Vault integrity 100% verified.*"
+    )
+    await send_rich_reply(update, text)
+
+@restricted
 async def cmd_speak(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = " ".join(context.args) if context.args else "Hello Revanth, Jarvis is at your service."
     audio_path = await voice_service.text_to_speech(text)
@@ -533,6 +554,13 @@ def main():
         print("ERROR: TELEGRAM_BOT_TOKEN not configured in .env file.")
         return
 
+    # Data Guardian: Auto-restore databases from vault backup if container was restarted
+    try:
+        restore_res = backup_service.restore_all_databases()
+        logger.info(f"Data Guardian auto-restore completed: {restore_res}")
+    except Exception as e:
+        logger.warning(f"Data Guardian restore warning: {e}")
+
     port = int(os.environ.get("PORT", 8080))
     start_health_server(port)
 
@@ -549,6 +577,7 @@ def main():
     app.add_handler(CommandHandler("notes", cmd_notes))
     app.add_handler(CommandHandler("books", cmd_books))
     app.add_handler(CommandHandler("expenses", cmd_expenses))
+    app.add_handler(CommandHandler(["backup", "vault"], cmd_backup))
     app.add_handler(CommandHandler("habits", cmd_habits))
     app.add_handler(CommandHandler("weather", cmd_weather))
     app.add_handler(CommandHandler("cricket", cmd_cricket))

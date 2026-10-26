@@ -1,9 +1,50 @@
 import sqlite3
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
+import re
 import json
+import config
 
 DB_FILE = os.path.join(os.path.dirname(__file__), "expenses.db")
+
+def normalize_expense_date(d_str: str = None) -> str:
+    """
+    Converts any natural language date (e.g. 'yesterday', 'today', '2 days ago',
+    'October 22, 2026', '22/10/2026') into standard ISO YYYY-MM-DD.
+    """
+    tz = config.get_tz()
+    today = datetime.now(tz).date()
+    if not d_str or not str(d_str).strip():
+        return today.isoformat()
+    
+    s = str(d_str).strip().lower()
+    if s in ["today", "tonight", "now"]:
+        return today.isoformat()
+    if s in ["yesterday"]:
+        return (today - timedelta(days=1)).isoformat()
+    if s in ["day before yesterday"]:
+        return (today - timedelta(days=2)).isoformat()
+    if s in ["tomorrow"]:
+        return (today + timedelta(days=1)).isoformat()
+    
+    m_ago = re.search(r'(\d+)\s*days?\s*ago', s)
+    if m_ago:
+        return (today - timedelta(days=int(m_ago.group(1)))).isoformat()
+        
+    for fmt in [
+        "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d",
+        "%B %d, %Y", "%b %d, %Y", "%d %B %Y", "%d %b %Y",
+        "%B %d", "%b %d"
+    ]:
+        try:
+            dt = datetime.strptime(str(d_str).strip(), fmt)
+            if fmt in ["%B %d", "%b %d"]:
+                dt = dt.replace(year=today.year)
+            return dt.date().isoformat()
+        except ValueError:
+            pass
+            
+    return today.isoformat()
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -18,14 +59,19 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # Self-healing migration for legacy relative dates
+    try:
+        cursor.execute("UPDATE expenses SET expense_date = DATE(created_at, '-1 day') WHERE LOWER(expense_date) = 'yesterday'")
+        cursor.execute("UPDATE expenses SET expense_date = DATE(created_at) WHERE LOWER(expense_date) IN ('today', 'now')")
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
 init_db()
 
 def log_expense(amount: float, category: str = "General", description: str = "", expense_date: str = None) -> dict:
-    if not expense_date:
-        expense_date = date.today().isoformat()
+    clean_date = normalize_expense_date(expense_date)
     try:
         amount_num = float(amount)
     except Exception:
@@ -36,17 +82,24 @@ def log_expense(amount: float, category: str = "General", description: str = "",
     cursor.execute("""
         INSERT INTO expenses (amount, category, description, expense_date)
         VALUES (?, ?, ?, ?)
-    """, (amount_num, category.strip().title(), description.strip(), expense_date.strip()))
+    """, (amount_num, category.strip().title(), description.strip(), clean_date))
     exp_id = cursor.lastrowid
     conn.commit()
     conn.close()
+
+    try:
+        import backup_service
+        backup_service.backup_all_databases()
+    except Exception:
+        pass
+
     return {
         "id": exp_id,
         "amount": amount_num,
         "category": category.strip().title(),
         "description": description.strip(),
-        "date": expense_date.strip(),
-        "status": f"Logged ₹{amount_num:,.2f} for '{description}' under {category} on {expense_date}."
+        "date": clean_date,
+        "status": f"Logged ₹{amount_num:,.2f} for '{description}' under {category} on {clean_date}."
     }
 
 def get_monthly_summary(month=None, year=None) -> dict:
@@ -101,9 +154,10 @@ def search_expenses(category: str = "", query: str = "", date_str: str = "") -> 
         q = f"%{query.strip().lower()}%"
         params.extend([q, q])
         
-    if date_str and date_str.strip():
-        sql += " AND expense_date = ?"
-        params.append(date_str.strip())
+    if date_str and str(date_str).strip():
+        norm_date = normalize_expense_date(date_str)
+        sql += " AND (expense_date = ? OR expense_date = ?)"
+        params.extend([norm_date, str(date_str).strip()])
         
     sql += " ORDER BY expense_date DESC, id DESC LIMIT 50"
     
@@ -121,9 +175,8 @@ def search_expenses(category: str = "", query: str = "", date_str: str = "") -> 
     }
 
 def get_expenses_by_date(date_str: str = None) -> list:
-    if not date_str:
-        date_str = date.today().isoformat()
-    return search_expenses(date_str=date_str).get("entries", [])
+    norm_date = normalize_expense_date(date_str)
+    return search_expenses(date_str=norm_date).get("entries", [])
 
 def get_recent_expenses(limit: int = 10) -> list:
     try:

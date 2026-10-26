@@ -43,6 +43,12 @@ def add_book(title: str, author: str = "", status: str = "Reading", notes: str =
     conn.commit()
     conn.close()
     
+    try:
+        import backup_service
+        backup_service.backup_all_databases()
+    except Exception:
+        pass
+
     return {
         "id": b_id,
         "title": title.strip(),
@@ -79,6 +85,12 @@ def update_book_progress(title: str, current_page: int, notes: str = "", status:
     conn.commit()
     conn.close()
     
+    try:
+        import backup_service
+        backup_service.backup_all_databases()
+    except Exception:
+        pass
+
     return {
         "id": b_id,
         "title": b_title,

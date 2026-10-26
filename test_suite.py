@@ -12,7 +12,7 @@ print("     JARVIS COMPREHENSIVE DIAGNOSTIC TEST SUITE   ")
 print("==================================================")
 
 tests_passed = 0
-total_tests = 15
+total_tests = 16
 
 def run_test(num, name, fn):
     global tests_passed
@@ -164,6 +164,15 @@ def test_dual_brain():
     reply = ai_agent.query_agent("Introduce yourself briefly as Revanth Sir's assistant.")
     assert "Revanth" in reply or "JARVIS" in reply or len(reply) > 10
 
+# 16. Data Guardian Vault & Persistence
+def test_data_guardian():
+    import backup_service
+    res = backup_service.backup_all_databases()
+    assert res["status"] == "success"
+    assert res["total_records"] >= 2
+    status = backup_service.get_vault_status()
+    assert status["vault_records"] >= 2
+
 if __name__ == "__main__":
     run_test(1, "Config & Whitelist Authorization", test_config)
     run_test(2, "Notes SQLite Second Brain", test_notes)
@@ -180,6 +189,7 @@ if __name__ == "__main__":
     run_test(13, "Calendar & Gmail Graceful Handling", test_google_fallbacks)
     run_test(14, "Books & Reading Tracker Subsystem", test_books)
     run_test(15, "Dual-Brain OpenAI/Gemini Hybrid Failover", test_dual_brain)
+    run_test(16, "Data Guardian Vault & Auto-Persistence", test_data_guardian)
 
     print("==================================================")
     print(f"RESULTS: {tests_passed}/{total_tests} Subsystems Verified Successfully!")
