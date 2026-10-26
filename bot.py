@@ -40,7 +40,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
-logger = logging.getLogger("JarvisBot")
+logger = logging.getLogger("YoBot")
 
 # Markdown to Telegram HTML Converter for Beautiful Rich Text
 def markdown_to_telegram_html(text: str) -> str:
@@ -109,7 +109,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(b'{"status": "ok", "service": "Jarvis AI Assistant"}')
+        self.wfile.write(b'{"status": "ok", "service": "YoBot AI Assistant"}')
 
     def do_HEAD(self):
         self.send_response(200)
@@ -167,7 +167,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if config.is_admin(user_id):
         welcome_text = (
-            "🤖 **JARVIS Executive AI Assistant Online**\n\n"
+            "🤖 **YoBot Executive AI Assistant Online**\n\n"
             "Welcome back, Revanth Sir! All master subsystems are operational.\n\n"
             "**Master Workstation Commands:**\n"
             "• `/device` or `/pc` — Workstation telemetry (CPU, RAM, Battery)\n"
@@ -274,7 +274,7 @@ async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines = ["📝 **Pending Tasks:**"]
         for t in active:
             lines.append(f"• `[ID {t['id']}]` {t['title']}")
-        lines.append("\nTip: Tell Jarvis *'Mark task 2 as completed'* to complete it.")
+        lines.append("\nTip: Tell YoBot *'Mark task 2 as completed'* to complete it.")
         await send_rich_reply(update, "\n".join(lines))
 
 @restricted
@@ -292,7 +292,7 @@ async def cmd_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         recent = notes_service.list_notes(limit=5)
         if not recent:
-            await update.message.reply_text("🧠 Second Brain is empty. Ask Jarvis: *'Note down server password is...'*" )
+            await update.message.reply_text("🧠 Second Brain is empty. Ask YoBot: *'Note down server password is...'*" )
             return
         lines = ["🧠 **Recent Notes:**"]
         for n in recent:
@@ -305,7 +305,7 @@ async def cmd_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
     recent = expenses_service.get_recent_expenses(limit=5)
     
     if summary["total_expenditure"] == 0 and not recent:
-        await send_rich_reply(update, "💰 **Expense Ledger**\n\nNo expenses recorded yet.\n\n• **Current Total:** ₹0.00\n• **Recent Logs:** None\n\nTo log an expense, you can tell Jarvis:\n• *Log expense ₹250 for lunch*\n• *Record an expense of ₹500 for groceries*")
+        await send_rich_reply(update, "💰 **Expense Ledger**\n\nNo expenses recorded yet.\n\n• **Current Total:** ₹0.00\n• **Recent Logs:** None\n\nTo log an expense, you can tell YoBot:\n• *Log expense ₹250 for lunch*\n• *Record an expense of ₹500 for groceries*")
         return
 
     lines = [
@@ -328,7 +328,7 @@ async def cmd_expenses(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_habits(update: Update, context: ContextTypes.DEFAULT_TYPE):
     habits = habits_service.list_habits()
     if not habits:
-        await update.message.reply_text("🌱 No habits configured yet. Tell Jarvis: *'Track habit: 30 mins reading'*.")
+        await update.message.reply_text("🌱 No habits configured yet. Tell YoBot: *'Track habit: 30 mins reading'*.")
         return
     lines = ["🌱 **Daily Habit Tracker:**"]
     for h in habits:
@@ -396,7 +396,7 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         active = reminders_service.list_active_reminders()
         if not active:
-            await send_rich_reply(update, "⏰ No active reminders. Tell Jarvis: *'Remind me in 15 minutes to call client'* or use `/remind 15 Call client`.")
+            await send_rich_reply(update, "⏰ No active reminders. Tell YoBot: *'Remind me in 15 minutes to call client'* or use `/remind 15 Call client`.")
         else:
             lines = ["⏰ **Active Scheduled Reminders:**"]
             for r in active:
@@ -409,7 +409,7 @@ async def cmd_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         books = books_service.list_books()
         if not books:
-            await send_rich_reply(update, "📚 No books currently tracked.\n\nAdd one using: `/books add <Title> by <Author>`\nOr simply tell Jarvis: *'I started reading Atomic Habits'*.")
+            await send_rich_reply(update, "📚 No books currently tracked.\n\nAdd one using: `/books add <Title> by <Author>`\nOr simply tell YoBot: *'I started reading Atomic Habits'*.")
             return
         lines = ["📚 **Your Books & Reading Library:**"]
         for b in books:
@@ -483,7 +483,7 @@ async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @restricted
 async def cmd_speak(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = " ".join(context.args) if context.args else "Hello Revanth, Jarvis is at your service."
+    text = " ".join(context.args) if context.args else "Hello, YoBot is at your service."
     audio_path = await voice_service.text_to_speech(text)
     try:
         with open(audio_path, "rb") as voice_file:
@@ -573,7 +573,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if os.path.exists(reply_audio):
                 os.remove(reply_audio)
     except Exception as e:
-        await update.message.reply_text(f"Jarvis voice error: {e}")
+        await update.message.reply_text(f"YoBot voice error: {e}")
 
 # Photo Handler (Receipt parsing / Visual queries)
 @restricted
@@ -649,7 +649,7 @@ def main():
         logger.info("Daily proactive scheduled jobs & dynamic reminder engine registered.")
 
     print("==================================================")
-    print(" JARVIS Executive Assistant is active & polling! ")
+    print("  YoBot Executive Assistant is active & polling!  ")
     print("==================================================")
     
     app.run_polling()

@@ -8,7 +8,7 @@ if sys.stdout.encoding.lower() != 'utf-8':
         pass
 
 print("==================================================")
-print("     JARVIS COMPREHENSIVE DIAGNOSTIC TEST SUITE   ")
+print("     YoBot COMPREHENSIVE DIAGNOSTIC TEST SUITE    ")
 print("==================================================")
 
 tests_passed = 0
@@ -162,7 +162,7 @@ def test_dual_brain():
     assert openai_res is None or isinstance(openai_res, str)
     # Verify overall query_agent works seamlessly with fallback
     reply = ai_agent.query_agent("Introduce yourself briefly as Revanth Sir's assistant.")
-    assert "Revanth" in reply or "JARVIS" in reply or len(reply) > 10
+    assert "Revanth" in reply or "YoBot" in reply or "JARVIS" in reply or len(reply) > 10
 
 # 16. Data Guardian Vault & Persistence
 def test_data_guardian():

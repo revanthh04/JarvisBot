@@ -18,7 +18,7 @@ import gmail_service
 import reminders_service
 import books_service
 
-logger = logging.getLogger("JarvisAI")
+logger = logging.getLogger("YoBotAI")
 genai.configure(api_key=config.GEMINI_API_KEY)
 
 # Initialize OpenAI client if API key is provided
@@ -89,7 +89,7 @@ tools_list = [
     books_service.search_books
 ]
 
-SYSTEM_PROMPT = """You are JARVIS, an elite executive personal AI assistant.
+SYSTEM_PROMPT = """You are YoBot, an elite executive personal AI assistant.
 Your executive user is Revanth Sir. Always address him with high respect as 'Revanth Sir'.
 You are loyal, efficient, hyper-precise, proactive, and completely factual.
 
@@ -150,7 +150,7 @@ def get_dynamic_system_prompt() -> str:
 
     if config.is_admin(user_id):
         persona = (
-            "You are JARVIS, an elite executive personal AI assistant.\n"
+            "You are YoBot, an elite executive personal AI assistant.\n"
             "Your executive user and master is Revanth Sir. Always address him with high respect as 'Revanth Sir'.\n"
             "You are loyal, efficient, hyper-precise, proactive, and completely factual."
         )
@@ -269,9 +269,9 @@ def query_gemini_agent(prompt: str) -> str:
                     response = session.send_message(prompt)
                     return clean_jarvis_text(response.text)
                 except Exception as e2:
-                    return f"Jarvis encountered an error: {e2}"
+                    return f"YoBot encountered an error: {e2}"
 
-    return "Jarvis is temporarily rate-limited across free tiers. Please try again in a few moments."
+    return "YoBot is temporarily rate-limited across free tiers. Please try again in a few moments."
 
 def query_agent(prompt: str) -> str:
     """
