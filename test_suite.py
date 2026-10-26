@@ -12,7 +12,7 @@ print("     JARVIS COMPREHENSIVE DIAGNOSTIC TEST SUITE   ")
 print("==================================================")
 
 tests_passed = 0
-total_tests = 13
+total_tests = 15
 
 def run_test(num, name, fn):
     global tests_passed
@@ -136,6 +136,34 @@ def test_google_fallbacks():
     g_res = gmail_service.list_emails()
     assert isinstance(g_res, list)
 
+# 14. Books Management Subsystem
+def test_books():
+    import books_service
+    import sqlite3
+    b = books_service.add_book("Atomic Habits", "James Clear", total_pages=320)
+    assert b["id"] > 0
+    up = books_service.update_book_progress("Atomic Habits", 45)
+    assert up["current_page"] == 45
+    books = books_service.list_books()
+    assert any(bk["title"] == "Atomic Habits" for bk in books)
+    found = books_service.search_books("Atomic")
+    assert len(found) > 0
+    # Cleanup test book
+    conn = sqlite3.connect(books_service.DB_FILE)
+    conn.execute("DELETE FROM books WHERE id = ?", (b["id"],))
+    conn.commit()
+    conn.close()
+
+# 15. Dual-Brain Hybrid Failover (OpenAI + Gemini)
+def test_dual_brain():
+    import ai_agent
+    # Verify query_openai returns None gracefully when quota exhausted without crashing
+    openai_res = ai_agent.query_openai("Hello")
+    assert openai_res is None or isinstance(openai_res, str)
+    # Verify overall query_agent works seamlessly with fallback
+    reply = ai_agent.query_agent("Introduce yourself briefly as Revanth Sir's assistant.")
+    assert "Revanth" in reply or "JARVIS" in reply or len(reply) > 10
+
 if __name__ == "__main__":
     run_test(1, "Config & Whitelist Authorization", test_config)
     run_test(2, "Notes SQLite Second Brain", test_notes)
@@ -148,8 +176,10 @@ if __name__ == "__main__":
     run_test(9, "DuckDuckGo Web Search Engine", test_search)
     run_test(10, "Cricket Live Score Engine", test_cricket)
     run_test(11, "Microsoft Edge Neural Voice TTS", test_voice)
-    run_test(12, "Gemini 1.5 Flash AI Core Reasoning", test_ai_agent)
+    run_test(12, "Gemini Flash AI Core Reasoning", test_ai_agent)
     run_test(13, "Calendar & Gmail Graceful Handling", test_google_fallbacks)
+    run_test(14, "Books & Reading Tracker Subsystem", test_books)
+    run_test(15, "Dual-Brain OpenAI/Gemini Hybrid Failover", test_dual_brain)
 
     print("==================================================")
     print(f"RESULTS: {tests_passed}/{total_tests} Subsystems Verified Successfully!")

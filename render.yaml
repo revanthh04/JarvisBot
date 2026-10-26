@@ -15,3 +15,5 @@ services:
         sync: false
       - key: USER_TIMEZONE
         value: Asia/Kolkata
+      - key: OPENAI_API_KEY
+        sync: false

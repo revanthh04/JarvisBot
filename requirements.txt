@@ -9,3 +9,5 @@ ddgs>=9.0.0
 beautifulsoup4>=4.12.3
 python-dotenv>=1.0.1
 pytz>=2024.1
+openai>=1.30.0
+google-auth-oauthlib>=1.0.0

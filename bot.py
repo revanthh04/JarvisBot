@@ -32,6 +32,7 @@ import voice_service
 import calendar_service
 import gmail_service
 import reminders_service
+import books_service
 
 # Logging setup
 logging.basicConfig(
@@ -152,6 +153,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `/clipboard [text]` — View or set PC clipboard\n"
         "• `/tasks` — Manage your to-do list\n"
         "• `/notes [query]` — Second Brain notes search\n"
+        "• `/books` — Track reading list and book page progress\n"
         "• `/expenses` — View monthly expense ledger\n"
         "• `/habits` — Habit streaks and daily check-ins\n"
         "• `/weather [city]` — Live weather forecast\n"
@@ -354,6 +356,64 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_rich_reply(update, "\n".join(lines))
 
 @restricted
+async def cmd_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if not args:
+        books = books_service.list_books()
+        if not books:
+            await send_rich_reply(update, "📚 No books currently tracked.\n\nAdd one using: `/books add <Title> by <Author>`\nOr simply tell Jarvis: *'I started reading Atomic Habits'*.")
+            return
+        lines = ["📚 **Your Books & Reading Library:**"]
+        for b in books:
+            prog = f" (Page {b['current_page']}/{b['total_pages']})" if b['total_pages'] > 0 else (f" (Page {b['current_page']})" if b['current_page'] > 0 else "")
+            lines.append(f"• **{b['title']}** by {b['author'] or 'Unknown'}\n  Status: {b['status']}{prog}")
+        await send_rich_reply(update, "\n".join(lines))
+        return
+
+    sub = args[0].lower()
+    if sub == "add":
+        rest = " ".join(args[1:])
+        if not rest:
+            await send_rich_reply(update, "Usage: `/books add <Title> by <Author>`")
+            return
+        parts = rest.split(" by ")
+        title = parts[0].strip()
+        author = parts[1].strip() if len(parts) > 1 else ""
+        res = books_service.add_book(title=title, author=author)
+        await send_rich_reply(update, f"📚 {res.get('status_message', 'Book added.')}")
+    elif sub in ["progress", "page", "update"]:
+        if len(args) < 3:
+            await send_rich_reply(update, "Usage: `/books progress <Title> <page_number>`")
+            return
+        page_str = args[-1]
+        title_str = " ".join(args[1:-1])
+        try:
+            page_num = int(page_str)
+            res = books_service.update_book_progress(title=title_str, current_page=page_num)
+            await send_rich_reply(update, f"📚 {res.get('status_message', res.get('error', 'Progress updated.'))}")
+        except ValueError:
+            await send_rich_reply(update, "Invalid page number. Usage: `/books progress <Title> <page_number>`")
+    elif sub == "completed":
+        books = books_service.list_books(status="Completed")
+        if not books:
+            await send_rich_reply(update, "📚 No completed books yet.")
+            return
+        lines = ["🏆 **Completed Books:**"]
+        for b in books:
+            lines.append(f"• **{b['title']}** by {b['author'] or 'Unknown'}")
+        await send_rich_reply(update, "\n".join(lines))
+    else:
+        query = " ".join(args)
+        results = books_service.search_books(query)
+        if not results:
+            await send_rich_reply(update, f"📚 No books found matching '{query}'.")
+            return
+        lines = [f"📚 **Search results for '{query}':**"]
+        for b in results:
+            lines.append(f"• **{b['title']}** by {b['author'] or 'Unknown'} ({b['status']})")
+        await send_rich_reply(update, "\n".join(lines))
+
+@restricted
 async def cmd_speak(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = " ".join(context.args) if context.args else "Hello Revanth, Jarvis is at your service."
     audio_path = await voice_service.text_to_speech(text)
@@ -487,6 +547,7 @@ def main():
     app.add_handler(CommandHandler("clipboard", cmd_clipboard))
     app.add_handler(CommandHandler("tasks", cmd_tasks))
     app.add_handler(CommandHandler("notes", cmd_notes))
+    app.add_handler(CommandHandler("books", cmd_books))
     app.add_handler(CommandHandler("expenses", cmd_expenses))
     app.add_handler(CommandHandler("habits", cmd_habits))
     app.add_handler(CommandHandler("weather", cmd_weather))

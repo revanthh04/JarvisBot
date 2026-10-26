@@ -7,6 +7,7 @@ load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 USER_TIMEZONE = os.getenv("USER_TIMEZONE", "Asia/Kolkata").strip()
 
 raw_ids = os.getenv("ALLOWED_USER_IDS", "").strip()
