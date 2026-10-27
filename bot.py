@@ -128,6 +128,30 @@ def start_health_server(port=8080):
     except Exception as e:
         logger.warning(f"Could not start health check server on port {port}: {e}")
 
+def keep_alive_self_pinger(service_url: str = "https://jarvis-bot-rhuk.onrender.com/", interval_seconds: int = 480):
+    """
+    Automated keep-alive self-pinger.
+    Periodically sends an HTTP request to the public Render URL every 8 minutes.
+    Generates genuine incoming HTTP traffic, resetting Render's 15-minute inactivity idle timer
+    so the container NEVER spins down into sleep mode.
+    """
+    import time
+    import requests
+    # Wait 60 seconds after startup before starting ping loop
+    time.sleep(60)
+    logger.info(f"Keep-alive self-pinger active for {service_url} (interval: {interval_seconds}s)")
+    while True:
+        try:
+            resp = requests.get(service_url, timeout=20)
+            logger.info(f"Keep-alive self-ping dispatched: HTTP {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"Keep-alive self-ping notice: {e}")
+        time.sleep(interval_seconds)
+
+def start_keep_alive_pinger():
+    t = threading.Thread(target=keep_alive_self_pinger, daemon=True)
+    t.start()
+
 # Security check decorator
 def restricted(func):
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
@@ -649,6 +673,7 @@ def main():
 
     port = int(os.environ.get("PORT", 8080))
     start_health_server(port)
+    start_keep_alive_pinger()
 
     app = ApplicationBuilder().token(config.TELEGRAM_BOT_TOKEN).build()
 

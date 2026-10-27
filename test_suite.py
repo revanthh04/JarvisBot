@@ -12,7 +12,7 @@ print("     YoBot COMPREHENSIVE DIAGNOSTIC TEST SUITE    ")
 print("==================================================")
 
 tests_passed = 0
-total_tests = 17
+total_tests = 18
 
 def run_test(num, name, fn):
     global tests_passed
@@ -218,6 +218,16 @@ def test_recurring_reminders():
     # Delete synthetic reminder
     reminders_service.delete_reminder(rem["id"])
 
+# 18. Smart 12-Hour Natural Language Reminder Extraction
+def test_smart_time_resolution():
+    import reminders_service
+    # Test message with implicit time and filler words
+    res = reminders_service.create_reminder("remind me at 11:30 to review budget okayy")
+    assert res["id"] > 0
+    assert "Review budget" in res["message"]
+    # Cleanup
+    reminders_service.delete_reminder(res["id"])
+
 if __name__ == "__main__":
     run_test(1, "Config & Whitelist Authorization", test_config)
     run_test(2, "Notes SQLite Second Brain", test_notes)
@@ -236,6 +246,7 @@ if __name__ == "__main__":
     run_test(15, "Dual-Brain OpenAI/Gemini Hybrid Failover", test_dual_brain)
     run_test(16, "Data Guardian Vault & Auto-Persistence", test_data_guardian)
     run_test(17, "Recurring Reminders Auto-Rescheduling Engine", test_recurring_reminders)
+    run_test(18, "Smart 12-Hour Natural Reminder Extraction", test_smart_time_resolution)
 
     print("==================================================")
     print(f"RESULTS: {tests_passed}/{total_tests} Subsystems Verified Successfully!")

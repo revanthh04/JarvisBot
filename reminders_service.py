@@ -53,8 +53,18 @@ def _clean_reminder_message(raw_msg: str) -> str:
     msg = re.sub(r'(?:\s+for)?\s+every\s+(?:hour|half(?:\s+an)?\s+hour|day)', '', msg, flags=re.IGNORECASE).strip()
     msg = re.sub(r'\s+daily\b', '', msg, flags=re.IGNORECASE).strip()
 
+    # Strip explicit time markers like 'at 7:45', 'at 7:45 pm', 'in 15 mins'
+    msg = re.sub(r'\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?', '', msg, flags=re.IGNORECASE).strip()
+    msg = re.sub(r'\bin\s+\d+\s*(?:minutes?|mins?|m|hours?|hrs?|h)', '', msg, flags=re.IGNORECASE).strip()
+
+    # Strip conversational fillers
+    msg = re.sub(r'\b(?:okayy?|ok|please|thanks?)\b', '', msg, flags=re.IGNORECASE).strip()
+
+    # Strip leading 'to ' or 'for ' if left behind
+    msg = re.sub(r'^(?:to|for)\s+', '', msg, flags=re.IGNORECASE).strip()
+
     if not msg:
-        msg = raw_msg.strip()
+        msg = "General Reminder"
     # Capitalize first letter
     return msg[0].upper() + msg[1:] if len(msg) > 1 else msg.upper()
 
@@ -72,7 +82,7 @@ def create_reminder(
     Parameters:
     - message: Content to remind about (e.g., 'Drink water', 'Team sync').
     - delay_minutes: Delay until first reminder in minutes.
-    - time_str: Natural language time string (e.g. 'in 20 mins', 'every 20 mins', '14:30', 'every hour').
+    - time_str: Natural language time string (e.g. 'in 20 mins', 'every 20 mins', '19:45', '7:45 PM', 'every hour').
     - repeat_interval_minutes: If > 0, reminder will automatically reschedule and repeat indefinitely every N minutes until stopped.
     - is_recurring: Explicit flag for recurring reminders.
     """
@@ -106,12 +116,27 @@ def create_reminder(
     if repeat_interval_minutes > 0:
         is_recurring = True
 
+    # If time_str was not passed, extract from message
+    if not time_str and not delay_minutes:
+        match_at = re.search(r'\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)', message, flags=re.IGNORECASE)
+        match_in_m = re.search(r'\bin\s+(\d+)\s*(?:minutes?|mins?|m)', message, flags=re.IGNORECASE)
+        match_in_h = re.search(r'\bin\s+(\d+)\s*(?:hours?|hrs?|h)', message, flags=re.IGNORECASE)
+        if match_at:
+            time_str = match_at.group(1)
+        elif match_in_h:
+            delay_minutes = int(match_in_h.group(1)) * 60
+        elif match_in_m:
+            delay_minutes = int(match_in_m.group(1))
+
     remind_dt = None
 
     if delay_minutes and delay_minutes > 0:
         remind_dt = now + timedelta(minutes=delay_minutes)
     elif time_str:
         time_clean = time_str.strip().lower()
+        has_am = bool(re.search(r'\bam\b', time_clean))
+        has_pm = bool(re.search(r'\bpm\b', time_clean))
+
         match_min = re.search(r'(\d+)\s*(?:m|min|minute|minutes)', time_clean)
         match_hr = re.search(r'(\d+)\s*(?:h|hr|hour|hours)', time_clean)
 
@@ -123,18 +148,38 @@ def create_reminder(
             remind_dt = now + timedelta(minutes=mins)
         else:
             time_upper = time_clean.upper()
-            for fmt in ["%H:%M", "%I:%M %p", "%I:%M%p", "%I %p", "%Y-%m-%d %H:%M"]:
+            for fmt in ["%H:%M", "%I:%M %p", "%I:%M%p", "%I %p", "%H"]:
                 try:
                     parsed = datetime.strptime(time_upper, fmt)
-                    if fmt in ["%H:%M", "%I:%M %p", "%I:%M%p", "%I %p"]:
-                        remind_dt = now.replace(hour=parsed.hour, minute=parsed.minute, second=0, microsecond=0)
+                    h = parsed.hour
+                    m = parsed.minute
+
+                    # Smart 12-hour resolution if AM/PM was omitted
+                    if not has_am and not has_pm and h < 12:
+                        dt_am = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                        dt_pm = now.replace(hour=h + 12, minute=m, second=0, microsecond=0)
+                        if dt_am < now and dt_pm >= now:
+                            remind_dt = dt_pm  # Target is this afternoon/evening!
+                        elif dt_am >= now:
+                            remind_dt = dt_am  # Target is this morning!
+                        else:
+                            remind_dt = dt_am + timedelta(days=1)  # Both today have passed, target tomorrow morning
+                    else:
+                        remind_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
                         if remind_dt < now:
                             remind_dt = remind_dt + timedelta(days=1)
-                    else:
-                        remind_dt = tz.localize(parsed)
                     break
                 except ValueError:
                     continue
+
+            if not remind_dt:
+                for fmt in ["%Y-%m-%d %H:%M", "%Y-%m-%d %I:%M %p"]:
+                    try:
+                        parsed = datetime.strptime(time_upper, fmt)
+                        remind_dt = tz.localize(parsed)
+                        break
+                    except ValueError:
+                        continue
 
     # If recurring and no specific first time specified, first trigger fires in repeat_interval_minutes
     if not remind_dt:

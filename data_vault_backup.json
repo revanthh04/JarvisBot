@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-26T16:09:10.930846",
+  "timestamp": "2026-10-26T20:02:28.399670",
   "tables": {
     "expenses": [
       {
@@ -39,6 +39,29 @@
     "notes": [],
     "tasks": [],
     "habits": [],
-    "reminders": []
+    "reminders": [
+      {
+        "id": 10,
+        "user_id": 5484600217,
+        "message": "At 7:45 okayy",
+        "remind_at": "2026-10-27T07:45:00+05:30",
+        "triggered": 0,
+        "created_at": "2026-10-26 14:23:05",
+        "repeat_interval_minutes": 0,
+        "is_recurring": 0,
+        "last_triggered_at": null
+      },
+      {
+        "id": 11,
+        "user_id": 5484600217,
+        "message": "At 7:45 okayy",
+        "remind_at": "2026-10-26T20:03:05.125613+05:30",
+        "triggered": 0,
+        "created_at": "2026-10-26 14:23:05",
+        "repeat_interval_minutes": 0,
+        "is_recurring": 0,
+        "last_triggered_at": null
+      }
+    ]
   }
 }
