@@ -130,6 +130,20 @@ def restore_all_databases() -> dict:
             if rec_id and rec_id in existing_ids:
                 continue
 
+            # Auto-retire stale one-time reminders from the past so restarts never replay expired alerts
+            if key == "reminders" and not rec.get("is_recurring"):
+                r_at = rec.get("remind_at")
+                if r_at:
+                    try:
+                        import pytz
+                        import config
+                        tz = config.get_tz()
+                        dt_r = datetime.fromisoformat(r_at)
+                        if dt_r < datetime.now(tz):
+                            rec["triggered"] = 1
+                    except Exception:
+                        pass
+
             # Dynamically insert
             cols = [col for col in rec.keys() if col in info["columns"]]
             if not cols:

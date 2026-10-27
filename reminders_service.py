@@ -38,7 +38,8 @@ def init_db():
 init_db()
 
 def _clean_reminder_message(raw_msg: str) -> str:
-    msg = raw_msg.strip()
+    # Normalize separators (e.g. 1;20 or 1.20 -> 1:20)
+    msg = re.sub(r'(\d{1,2})[;.](\d{2})', r'\1:\2', raw_msg.strip())
     # Strip common leading conversational phrases
     patterns_strip = [
         r'^(?:so\s+)?(?:from\s+here\s+on\s+(?:words|out)\s+)?remind\s+(?:me\s+)?(?:to\s+|for\s+)?',
@@ -116,11 +117,16 @@ def create_reminder(
     if repeat_interval_minutes > 0:
         is_recurring = True
 
+    # Normalize time separators (e.g. 1;20 or 1.20 -> 1:20)
+    norm_msg = re.sub(r'(\d{1,2})[;.](\d{2})', r'\1:\2', message)
+    if time_str:
+        time_str = re.sub(r'(\d{1,2})[;.](\d{2})', r'\1:\2', time_str)
+
     # If time_str was not passed, extract from message
     if not time_str and not delay_minutes:
-        match_at = re.search(r'\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)', message, flags=re.IGNORECASE)
-        match_in_m = re.search(r'\bin\s+(\d+)\s*(?:minutes?|mins?|m)', message, flags=re.IGNORECASE)
-        match_in_h = re.search(r'\bin\s+(\d+)\s*(?:hours?|hrs?|h)', message, flags=re.IGNORECASE)
+        match_at = re.search(r'\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)', norm_msg, flags=re.IGNORECASE)
+        match_in_m = re.search(r'\bin\s+(\d+)\s*(?:minutes?|mins?|m)', norm_msg, flags=re.IGNORECASE)
+        match_in_h = re.search(r'\bin\s+(\d+)\s*(?:hours?|hrs?|h)', norm_msg, flags=re.IGNORECASE)
         if match_at:
             time_str = match_at.group(1)
         elif match_in_h:
@@ -291,6 +297,12 @@ def mark_reminder_triggered(reminder_id: int):
     c.execute("UPDATE reminders SET triggered = 1, last_triggered_at = ? WHERE id = ?", (now_iso, reminder_id))
     conn.commit()
     conn.close()
+
+    try:
+        import backup_service
+        backup_service.backup_all_databases()
+    except Exception:
+        pass
 
 def stop_recurring_reminders(keyword: str = "", user_id: int = None) -> dict:
     """

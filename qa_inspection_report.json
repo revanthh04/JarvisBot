@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-26T15:37:48.743216",
+  "timestamp": "2026-10-27T12:05:12.970054",
   "parameters_tested": 12,
   "parameters_passed": 12,
   "details": [
@@ -19,7 +19,7 @@
       "number": 3,
       "name": "Reminders Engine (One-Shot & Recurring Auto-Rescheduling)",
       "status": "PASS",
-      "details": "Verified one-shot trigger, verified recurring 20-min parsing, auto-rescheduling (next at 03:58 PM), and keyword cancellation."
+      "details": "Verified one-shot trigger, verified recurring 20-min parsing, auto-rescheduling (next at 12:25 PM), and keyword cancellation."
     },
     {
       "number": 4,
@@ -31,25 +31,25 @@
       "number": 5,
       "name": "Expenses Lifecycle (Add/Date/AI Verify/Delete)",
       "status": "PASS",
-      "details": "Added ₹150 Filter Coffee (ID #19), AI verified response: 'Yes, Revanth Sir. You have an expense logged for Filter Coff...', cleanly deleted."
+      "details": "Added ₹150 Filter Coffee (ID #24), AI verified response: 'Yes, Revanth Sir. You logged a Filter Coffee expense today (...', cleanly deleted."
     },
     {
       "number": 6,
       "name": "Books Lifecycle (Add/Progress/AI Verify/Delete)",
       "status": "PASS",
-      "details": "Added book (ID #13), updated to page 88, AI verified: 'You are currently on **page 88** of *QA Test The Pragmatic P...', cleanly deleted."
+      "details": "Added book (ID #15), updated to page 88, AI verified: 'Revanth Sir, you are currently on **page 88** of *QA Test Th...', cleanly deleted."
     },
     {
       "number": 7,
       "name": "Tasks Lifecycle (Add/List/Complete/Delete)",
       "status": "PASS",
-      "details": "Added task #14, verified pending, marked completed, cleanly deleted."
+      "details": "Added task #19, verified pending, marked completed, cleanly deleted."
     },
     {
       "number": 8,
       "name": "Notes Second Brain (Add/Search/Delete)",
       "status": "PASS",
-      "details": "Added note #14, verified keyword search match, cleanly deleted."
+      "details": "Added note #19, verified keyword search match, cleanly deleted."
     },
     {
       "number": 9,
@@ -61,7 +61,7 @@
       "number": 10,
       "name": "Anti-Hallucination Date Grounding",
       "status": "PASS",
-      "details": "Expected October 2026, Agent replied: 'Today's exact date is **Monday, October 26, 2026**, Revanth Sir.'"
+      "details": "Expected October 2026, Agent replied: 'Revanth Sir, today's exact date is Tuesday, October 27, 2026.'"
     },
     {
       "number": 11,
@@ -73,7 +73,7 @@
       "number": 12,
       "name": "Data Guardian Vault Auto-Sync",
       "status": "PASS",
-      "details": "Total vault records preserved: 3 across 6 tables."
+      "details": "Total vault records preserved: 5 across 6 tables."
     }
   ]
 }
