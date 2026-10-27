@@ -1,6 +1,6 @@
 # YoBot — Autonomous AI Executive Assistant & Second Brain 🤖
 
-[![Telegram Bot](https://img.shields.io/badge/Telegram-@Revu04__bot-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/Revu04_bot)
+[![Telegram Bot](https://img.shields.io/badge/Telegram-@Revu04__bot-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://telegram.me/Revu04_bot)
 [![Python Version](https://img.shields.io/badge/Python-3.13-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Google Gemini](https://img.shields.io/badge/AI-Google%20Gemini-8E75C2?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
 [![OpenAI](https://img.shields.io/badge/AI-OpenAI%20GPT--4o--mini-412991?style=for-the-badge&logo=openai&logoColor=white)](https://openai.com/)
@@ -8,7 +8,8 @@
 
 An asynchronous, cloud-native Telegram AI personal assistant built in Python. Powered by a dual-brain architecture (**OpenAI GPT-4o-mini** and a multi-tier **Google Gemini failover pool**), YoBot functions as a full-featured second brain for managing expenses, reading progress, recurring reminders, tasks, and daily habits with autonomous function calling.
 
-👉 **Live Telegram Bot:** [https://t.me/Revu04_bot](https://t.me/Revu04_bot) (`@Revu04_bot`)
+👉 **Live Telegram Bot:** [https://telegram.me/Revu04_bot](https://telegram.me/Revu04_bot) *(or search `@Revu04_bot` on Telegram)*  
+🌐 **Web Client Alternative:** [https://web.telegram.org/k/#@Revu04_bot](https://web.telegram.org/k/#@Revu04_bot)
 
 ---
 
