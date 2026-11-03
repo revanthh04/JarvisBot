@@ -2,6 +2,9 @@ import config
 import os
 import base64
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from html import escape
+import threading
 from html import unescape
 
 def _message_body(payload: dict) -> str:
@@ -91,8 +94,53 @@ def read_email(msg_id: str) -> str:
     except Exception as e:
         return f"Failed to read email {msg_id}: {e}"
 
+_drafts = {}
+_draft_lock = threading.RLock()
+
 @config.require_admin
 def send_email(to: str, subject: str, body: str) -> str:
+    """Prepare an email draft. The user must choose tone and approve in Telegram before delivery."""
+    with _draft_lock:
+        _drafts[config.get_current_user_id()] = {
+            "to": to, "subject": subject, "body": body, "stage": "tone",
+        }
+    return "Email not sent. Which tone would you like: formal, informal, or warm/personal? Reply with your choice, or cancel."
+
+def handle_email_reply(text: str, rewrite):
+    """Consume only explicit draft replies; unrelated questions keep their normal route."""
+    uid = config.get_current_user_id()
+    if not config.is_admin(uid):
+        return None
+    choice = text.strip().lower().rstrip('.!')
+    with _draft_lock:
+        draft = _drafts.get(uid)
+        if draft is None:
+            return None
+        if choice in ("cancel", "cancel email", "discard email"):
+            del _drafts[uid]
+            return "Email draft cancelled. Nothing was sent."
+        if choice in ("formal", "informal", "warm", "personal", "warm/personal", "friendly"):
+            try:
+                revised = rewrite(draft.copy(), choice)
+                if not isinstance(revised, dict) or not all(isinstance(revised.get(k), str) and revised[k].strip() for k in ("subject", "body")):
+                    raise ValueError("Invalid draft")
+            except Exception:
+                return "I couldn't format the draft just now. Nothing was sent. Please choose the tone again to retry."
+            draft.update(subject=revised["subject"], body=revised["body"], stage="confirm", tone=choice)
+            body = draft['body'].replace('\\n', '\n')
+            return (f"**Email preview — {choice}**\n\n**To:** {draft['to']}\n**Subject:** {draft['subject']}\n\n{body}\n\n"
+                    "Reply **send email** to send this draft, choose another tone, or **cancel**. To edit it, cancel and describe the new message.")
+        if choice in ("send email", "confirm send"):
+            if draft["stage"] != "confirm":
+                return "Please choose formal, informal, or warm/personal first. I'll show the draft before sending."
+            del _drafts[uid]  # Consume approval before I/O; never auto-retry an uncertain send.
+            return _deliver_email(draft["to"], draft["subject"], draft["body"])
+        if choice in ("yes", "send", "ok", "okay"):
+            return "Choose a tone first." if draft["stage"] == "tone" else "To send the previewed draft, reply **send email**."
+    return None
+
+@config.require_admin
+def _deliver_email(to: str, subject: str, body: str) -> str:
     token_path = os.path.join(os.path.dirname(__file__), "token.json")
     if not os.path.exists(token_path):
         return "Gmail is not linked yet."
@@ -107,7 +155,13 @@ def send_email(to: str, subject: str, body: str) -> str:
         # Tool arguments sometimes contain double-escaped line breaks. Decode only
         # these separators, preserving Unicode and unrelated backslash sequences.
         body = body.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n")
-        message = MIMEText(body, "plain", "utf-8")
+        message = MIMEMultipart("alternative")
+        message.attach(MIMEText(body, "plain", "utf-8"))
+        paragraphs = body.split("\n\n")
+        html_body = '<html><body style="font-family:Arial,sans-serif;font-size:15px;line-height:1.6">' + ''.join(
+            '<p>' + escape(paragraph).replace('\n', '<br>') + '</p>' for paragraph in paragraphs
+        ) + '</body></html>'
+        message.attach(MIMEText(html_body, "html", "utf-8"))
         message["to"] = to
         message["subject"] = subject
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")

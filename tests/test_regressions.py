@@ -56,6 +56,7 @@ class IsolatedTest(unittest.TestCase):
                        "httplib2.Http.request"):
             self.stack.enter_context(patch(target, side_effect=AssertionError("Network disabled in tests")))
         config.set_current_user(config.ADMIN_USER_ID, "Revanth Sir")
+        bot.gmail_service._drafts.clear()
         config.MISSING_DATABASES.clear()
         self.stack.enter_context(patch.object(config, "OPEN_ACCESS", False))
         self.stack.enter_context(patch.object(config, "ALLOWED_USER_IDS", [OTHER, THIRD]))
@@ -145,6 +146,21 @@ class AccessTests(IsolatedTest):
 
 
 class ReminderTests(IsolatedTest):
+    def test_startup_does_not_replay_snapshot_reminders(self):
+        now = self.freeze_reminders()
+        service = SERVICES["reminders"]
+        old = service.create_reminder("Old alert", delay_minutes=1)
+        recurring = service.create_reminder("Water every 20 mins")
+        future = service.create_reminder("Future appointment", delay_minutes=60)
+        with closing(sqlite3.connect(service.DB_FILE)) as conn:
+            conn.execute("UPDATE reminders SET remind_at = '2026-10-23T13:20:00+05:30' WHERE id IN (?, ?)", (old["id"], recurring["id"]))
+            conn.commit()
+        self.assertEqual(service.reconcile_overdue_at_startup(), {"expired": 1, "rescheduled": 1})
+        self.assertEqual(service.get_due_reminders(), [])
+        active = {r["id"] for r in service.list_active_reminders()}
+        self.assertEqual(active, {future["id"], recurring["id"]})
+        self.assertEqual(service.reconcile_overdue_at_startup(), {"expired": 0, "rescheduled": 0})
+
     def test_compact_am_remains_morning(self):
         self.freeze_reminders(5)
         SERVICES["reminders"].create_reminder("Call", time_str="6:30am")
@@ -379,6 +395,29 @@ class SheetsTests(IsolatedTest):
 
 
 class GoogleTests(IsolatedTest):
+    def test_email_requires_tone_preview_and_explicit_confirmation(self):
+        gmail = bot.gmail_service
+        rewrite = Mock(return_value={"subject": "Thinking of you", "body": "Hi,\n\nI miss you."})
+        with patch.object(gmail, "_deliver_email", return_value="Sent") as deliver:
+            self.assertIn("Which tone", gmail.send_email("test@example.invalid", "Hi", "I miss you"))
+            gmail.handle_email_reply("send email", rewrite)
+            deliver.assert_not_called()
+            self.assertIn("Email preview", gmail.handle_email_reply("warm", rewrite))
+            gmail.handle_email_reply("yes", rewrite)
+            deliver.assert_not_called()
+            self.assertEqual(gmail.handle_email_reply("send email", rewrite), "Sent")
+            gmail.handle_email_reply("send email", rewrite)
+            deliver.assert_called_once()
+
+    def test_email_cancel_and_failed_rewrite_do_not_send(self):
+        gmail = bot.gmail_service
+        gmail.send_email("test@example.invalid", "Hi", "Body")
+        with patch.object(gmail, "_deliver_email") as deliver:
+            self.assertIn("Nothing was sent", gmail.handle_email_reply("formal", Mock(side_effect=RuntimeError())))
+            gmail.handle_email_reply("cancel", Mock())
+            self.assertIsNone(gmail.handle_email_reply("send email", Mock()))
+            deliver.assert_not_called()
+
     def test_email_escaped_newlines_become_paragraphs(self):
         from email import message_from_bytes
         service = Mock()
@@ -386,10 +425,14 @@ class GoogleTests(IsolatedTest):
         with patch.object(bot.gmail_service.os.path, "exists", return_value=True), \
              patch("google.oauth2.credentials.Credentials.from_authorized_user_file"), \
              patch("googleapiclient.discovery.build", return_value=service):
-            bot.gmail_service.send_email("test@example.invalid", "Test", r"Hi Aishwarya,\n\nI miss you.\n\nWarmly,\nRevanth — ₹")
+            bot.gmail_service._deliver_email("test@example.invalid", "Test", r"Hi Aishwarya,\n\nI miss you.\n\nWarmly,\nRevanth — ₹")
         raw = service.users.return_value.messages.return_value.send.call_args.kwargs["body"]["raw"]
         message = message_from_bytes(base64.urlsafe_b64decode(raw))
-        body = message.get_payload(decode=True).decode(message.get_content_charset())
+        self.assertEqual(message.get_content_type(), "multipart/alternative")
+        plain, html = message.get_payload()
+        body = plain.get_payload(decode=True).decode(plain.get_content_charset())
+        html_body = html.get_payload(decode=True).decode(html.get_content_charset())
+        self.assertIn("<p>Hi Aishwarya,</p>", html_body)
         self.assertEqual(body, "Hi Aishwarya,\n\nI miss you.\n\nWarmly,\nRevanth — ₹")
 
     def test_invalid_cloud_token_preserves_working_credentials(self):

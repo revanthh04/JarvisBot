@@ -267,6 +267,39 @@ def create_reminder(
         "status": status_text
     }
 
+def reconcile_overdue_at_startup() -> dict:
+    """Do not replay historical alerts from a redeployed database snapshot."""
+    now = datetime.now(config.get_tz())
+    expired = rescheduled = 0
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        with conn:
+            rows = conn.execute("SELECT id, remind_at, is_recurring, repeat_interval_minutes FROM reminders WHERE triggered = 0").fetchall()
+            for reminder_id, raw_time, recurring, interval in rows:
+                try:
+                    due = datetime.fromisoformat(raw_time)
+                    if due.tzinfo is None:
+                        due = config.get_tz().localize(due)
+                except (TypeError, ValueError):
+                    conn.execute("UPDATE reminders SET triggered = 1 WHERE id = ?", (reminder_id,))
+                    expired += 1
+                    continue
+                if due > now:
+                    continue
+                if recurring and interval and interval > 0:
+                    next_due = now + timedelta(minutes=interval)
+                    conn.execute("UPDATE reminders SET remind_at = ? WHERE id = ?", (next_due.isoformat(), reminder_id))
+                    rescheduled += 1
+                else:
+                    conn.execute("UPDATE reminders SET triggered = 1 WHERE id = ?", (reminder_id,))
+                    expired += 1
+    finally:
+        conn.close()
+    if expired or rescheduled:
+        import backup_service
+        backup_service.backup_all_databases()
+    return {"expired": expired, "rescheduled": rescheduled}
+
 def get_due_reminders() -> list:
     """
     Returns all reminders that are due to trigger right now.

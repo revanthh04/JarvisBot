@@ -840,6 +840,11 @@ def main():
     except Exception as e:
         logger.warning(f"Data Guardian restore warning: {e}")
 
+    # Free-host redeploys can reload a snapshot with already delivered alerts.
+    # Never send that historical backlog as if the user just requested it.
+    cleanup = reminders_service.reconcile_overdue_at_startup()
+    logger.info("Startup reminder reconciliation: %s", cleanup)
+
     port = int(os.environ.get("PORT", 8080))
     start_health_server(port)
     start_keep_alive_pinger()
