@@ -104,7 +104,10 @@ def send_email(to: str, subject: str, body: str) -> str:
         creds = Credentials.from_authorized_user_file(token_path)
         service = build("gmail", "v1", credentials=creds)
 
-        message = MIMEText(body)
+        # Tool arguments sometimes contain double-escaped line breaks. Decode only
+        # these separators, preserving Unicode and unrelated backslash sequences.
+        body = body.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\r\n", "\n")
+        message = MIMEText(body, "plain", "utf-8")
         message["to"] = to
         message["subject"] = subject
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")

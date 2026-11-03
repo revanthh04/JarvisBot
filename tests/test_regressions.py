@@ -379,6 +379,19 @@ class SheetsTests(IsolatedTest):
 
 
 class GoogleTests(IsolatedTest):
+    def test_email_escaped_newlines_become_paragraphs(self):
+        from email import message_from_bytes
+        service = Mock()
+        service.users.return_value.messages.return_value.send.return_value.execute.return_value = {"id": "test-only"}
+        with patch.object(bot.gmail_service.os.path, "exists", return_value=True), \
+             patch("google.oauth2.credentials.Credentials.from_authorized_user_file"), \
+             patch("googleapiclient.discovery.build", return_value=service):
+            bot.gmail_service.send_email("test@example.invalid", "Test", r"Hi Aishwarya,\n\nI miss you.\n\nWarmly,\nRevanth — ₹")
+        raw = service.users.return_value.messages.return_value.send.call_args.kwargs["body"]["raw"]
+        message = message_from_bytes(base64.urlsafe_b64decode(raw))
+        body = message.get_payload(decode=True).decode(message.get_content_charset())
+        self.assertEqual(body, "Hi Aishwarya,\n\nI miss you.\n\nWarmly,\nRevanth — ₹")
+
     def test_invalid_cloud_token_preserves_working_credentials(self):
         token = Path(SANDBOX.name) / "token-test.json"
         token.write_text('{"test": "original"}', encoding="utf-8")
