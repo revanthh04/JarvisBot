@@ -2,11 +2,16 @@ import sqlite3
 import json
 import os
 import logging
+import tempfile
+import threading
+from contextlib import closing
+from functools import wraps
+import config
 from datetime import datetime
 
 logger = logging.getLogger("DataGuardian")
 
-BASE_DIR = os.path.dirname(__file__)
+BASE_DIR = config.DATA_DIR
 VAULT_FILE = os.path.join(BASE_DIR, "data_vault_backup.json")
 
 DATABASES = {
@@ -35,6 +40,11 @@ DATABASES = {
         "table": "habits",
         "columns": ["id", "user_id", "name", "created_at"]
     },
+    "habit_logs": {
+        "file": os.path.join(BASE_DIR, "habits.db"),
+        "table": "habit_logs",
+        "columns": ["id", "habit_id", "log_date"]
+    },
     "reminders": {
         "file": os.path.join(BASE_DIR, "reminders.db"),
         "table": "reminders",
@@ -42,138 +52,118 @@ DATABASES = {
     }
 }
 
+_vault_lock = threading.RLock()
+
+def _serialized(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        with _vault_lock:
+            return func(*args, **kwargs)
+    return wrapped
+
+@_serialized
 def backup_all_databases() -> dict:
-    """
-    Snapshots all 6 SQLite databases into a portable JSON vault.
-    Guarantees data survives server restarts or container re-deployments.
-    """
-    vault = {
-        "timestamp": datetime.now().isoformat(),
-        "tables": {}
-    }
+    """Atomically snapshot every table; preserve the last vault if a read fails.
 
-    total_records = 0
-    for key, info in DATABASES.items():
-        db_path = info["file"]
-        table_name = info["table"]
-        records = []
-        if os.path.exists(db_path):
-            try:
-                conn = sqlite3.connect(db_path)
+    The vault must be on persistent storage to survive container replacement.
+    """
+    vault = {"timestamp": datetime.now().isoformat(), "tables": {}}
+    temp_path = None
+    try:
+        # Read tables sharing a database in one transaction (habits + their logs).
+        for db_path in dict.fromkeys(info["file"] for info in DATABASES.values()):
+            if not os.path.exists(db_path):
+                raise FileNotFoundError(f"Missing database: {os.path.basename(db_path)}")
+            with closing(sqlite3.connect(db_path)) as conn:
                 conn.row_factory = sqlite3.Row
-                c = conn.cursor()
-                # Check if table exists
-                c.execute(f"SELECT count(*) FROM sqlite_master WHERE type='table' AND name='{table_name}'")
-                if c.fetchone()[0] > 0:
-                    rows = c.execute(f"SELECT * FROM {table_name}").fetchall()
-                    records = [dict(r) for r in rows]
-                conn.close()
-            except Exception as e:
-                logger.error(f"Error backing up {key}: {e}")
-
-        vault["tables"][key] = records
-        total_records += len(records)
-
-    with open(VAULT_FILE, "w", encoding="utf-8") as f:
-        json.dump(vault, f, indent=2, ensure_ascii=False)
+                conn.execute("BEGIN")
+                for key, info in DATABASES.items():
+                    if info["file"] == db_path:
+                        rows = conn.execute(f"SELECT * FROM {info['table']}").fetchall()
+                        vault["tables"][key] = [dict(row) for row in rows]
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=BASE_DIR,
+                                         prefix="vault-", suffix=".tmp", delete=False) as f:
+            temp_path = f.name
+            json.dump(vault, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, VAULT_FILE)
+    except Exception as exc:
+        logger.error("Backup failed; previous vault preserved: %s", exc)
+        return {"status": "error", "error": str(exc)}
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
     try:
         import sheets_service
         sheets_service.trigger_background_sync()
-    except Exception as e:
-        logger.debug(f"Sheets background sync trigger notice: {e}")
-
+    except Exception as exc:
+        logger.debug("Sheets sync trigger: %s", exc)
     return {
         "status": "success",
-        "total_records": total_records,
+        "total_records": sum(len(rows) for rows in vault["tables"].values()),
         "vault_file": VAULT_FILE,
-        "timestamp": vault["timestamp"]
+        "timestamp": vault["timestamp"],
     }
 
+@_serialized
 def restore_all_databases() -> dict:
-    """
-    Auto-restores data from the JSON vault if an ephemeral container restarted
-    with empty or missing SQLite database files.
+    """Restore only databases missing at process startup, never merge stale rows.
+
+    Existing SQLite files remain authoritative, including deliberately empty tables.
+    Older vaults without habit_logs remain readable.
     """
     if not os.path.exists(VAULT_FILE):
         return {"status": "no_backup_found", "restored": 0}
-
     try:
-        with open(VAULT_FILE, "r", encoding="utf-8") as f:
-            vault = json.load(f)
-    except Exception as e:
-        logger.error(f"Could not read vault file: {e}")
-        return {"status": "read_error", "error": str(e)}
+        with open(VAULT_FILE, encoding="utf-8") as f:
+            tables = json.load(f)["tables"]
+        if not isinstance(tables, dict):
+            raise ValueError("Invalid vault tables")
+    except Exception as exc:
+        return {"status": "read_error", "error": str(exc)}
 
-    tables = vault.get("tables", {})
     restored_counts = {}
-
-    for key, records in tables.items():
-        if not records:
+    errors = {}
+    for name in sorted(config.MISSING_DATABASES.copy()):
+        info = DATABASES.get(name)
+        if info is None or name not in tables:
             continue
-        info = DATABASES.get(key)
-        if not info:
-            continue
-
-        db_path = info["file"]
-        table_name = info["table"]
-
-        # Ensure database tables exist by calling their respective init
-        conn = sqlite3.connect(db_path)
-        c = conn.cursor()
-
-        # Check existing IDs to prevent duplicates
-        existing_ids = set()
         try:
-            c.execute(f"SELECT id FROM {table_name}")
-            existing_ids = {row[0] for row in c.fetchall()}
-        except Exception:
-            pass
-
-        inserted = 0
-        for rec in records:
-            rec_id = rec.get("id")
-            if rec_id and rec_id in existing_ids:
-                continue
-
-            # Auto-retire stale one-time reminders from the past so restarts never replay expired alerts
-            if key == "reminders" and not rec.get("is_recurring"):
-                r_at = rec.get("remind_at")
-                if r_at:
-                    try:
-                        import pytz
-                        import config
-                        tz = config.get_tz()
-                        dt_r = datetime.fromisoformat(r_at)
-                        if dt_r.tzinfo is None:
-                            dt_r = tz.localize(dt_r)
-                        if dt_r < datetime.now(tz):
-                            rec["triggered"] = 1
-                    except Exception as ex:
-                        logger.debug(f"Reminder retirement check notice: {ex}")
-
-            # Dynamically insert
-            cols = [col for col in rec.keys() if col in info["columns"]]
-            if not cols:
-                continue
-            placeholders = ", ".join(["?"] * len(cols))
-            col_names = ", ".join(cols)
-            values = [rec[c_name] for c_name in cols]
-
-            try:
-                c.execute(f"INSERT OR REPLACE INTO {table_name} ({col_names}) VALUES ({placeholders})", values)
-                inserted += 1
-            except Exception as err:
-                logger.warning(f"Error inserting restored row in {table_name}: {err}")
-
-        conn.commit()
-        conn.close()
-        restored_counts[key] = inserted
-
-    return {
-        "status": "restored",
-        "restored_counts": restored_counts
-    }
+            # Import initializes a missing database even outside bot.main().
+            import importlib
+            service = importlib.import_module(f"{name}_service")
+            service.init_db()
+            with closing(sqlite3.connect(info["file"])) as conn:
+                conn.execute("PRAGMA foreign_keys = ON")
+                with conn:
+                    keys = [key for key, meta in DATABASES.items() if meta["file"] == info["file"]]
+                    # Never overwrite records written since initial startup.
+                    if any(conn.execute(f"SELECT COUNT(*) FROM {DATABASES[key]['table']}").fetchone()[0] for key in keys):
+                        config.MISSING_DATABASES.discard(name)
+                        continue
+                    counts = {}
+                    for key in keys:
+                        meta = DATABASES[key]
+                        counts[key] = 0
+                        for record in tables.get(key, []):
+                            cols = [col for col in meta["columns"] if col in record]
+                            if not cols:
+                                raise ValueError(f"Invalid record for {key}")
+                            placeholders = ", ".join("?" for _ in cols)
+                            conn.execute(
+                                f"INSERT INTO {meta['table']} ({', '.join(cols)}) VALUES ({placeholders})",
+                                [record[col] for col in cols],
+                            )
+                            counts[key] += 1
+                    # Due reminders stay pending: the delivery job must send them.
+                restored_counts.update(counts)
+            config.MISSING_DATABASES.discard(name)
+        except Exception as exc:
+            errors[name] = str(exc)
+            logger.error("Could not restore %s: %s", name, exc)
+    return {"status": "error" if errors else "restored", "restored_counts": restored_counts, "errors": errors}
 
 def get_vault_status() -> dict:
     """

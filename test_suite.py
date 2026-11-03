@@ -1,6 +1,13 @@
 import sys
 import os
 
+# Safe default: the original diagnostics below touch live services and personal data.
+if __name__ == "__main__" and "--live" not in sys.argv:
+    import unittest
+    suite = unittest.defaultTestLoader.discover(os.path.join(os.path.dirname(__file__), "tests"))
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    sys.exit(0 if result.wasSuccessful() else 1)
+
 if sys.stdout.encoding.lower() != 'utf-8':
     try:
         sys.stdout.reconfigure(encoding='utf-8')

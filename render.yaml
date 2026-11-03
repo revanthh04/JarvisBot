@@ -13,6 +13,10 @@ services:
         sync: false
       - key: ALLOWED_USER_IDS
         sync: false
+      - key: OPEN_ACCESS
+        value: "false"
+      - key: GOOGLE_TOKEN_JSON
+        sync: false
       - key: USER_TIMEZONE
         value: Asia/Kolkata
       - key: OPENAI_API_KEY

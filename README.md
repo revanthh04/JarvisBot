@@ -19,11 +19,11 @@ An asynchronous, cloud-native Telegram AI personal assistant built in Python. Po
 - **⏰ Smart Recurring Reminders:** Natural-language interval detection (`"every 20 mins"`, `"every hour"`, `"daily"`) with 12-hour AM/PM smart resolution and automated background rescheduling.
 - **💰 Expense & Financial Ledger:** Tracks spendings, calculates monthly totals, groups by category, and normalizes natural-language dates.
 - **📚 Book Reading Tracker:** Logs current reading progress, pages read, completion status, and personal reading notes.
-- **🛡️ Data Guardian Master Vault:** Automatic atomic JSON snapshotting of all SQLite databases ensuring 100% data durability across ephemeral cloud container restarts.
+- **🛡️ Data Guardian Master Vault:** Atomic JSON snapshots of SQLite data, including habit completion history. Cloud durability requires persistent storage for both the databases and the vault.
 - **📊 Google Sheets Live Cloud Sync:** Instant SQLite transactions coupled with non-blocking background synchronization to a live Google Spreadsheet dashboard accessible directly from your phone.
 - **🎙️ Voice & Multimodal:** Supports voice message transcription, receipt image recognition, and Edge-TTS voice replies.
 - **🔒 Multi-Tenant Privacy Isolation:** Thread-safe user session isolation via Python `contextvars`, allowing seamless sharing with friends while keeping personal records private.
-- **⚡ 24/7 Cloud Resilience:** Built-in HTTP server and background self-pinger to prevent Render free-tier containers from spinning down into sleep mode.
+- **⚡ 24/7 Cloud Resilience:** Built-in HTTP health server and self-pinger. The free deployment does not guarantee uninterrupted operation or durable local storage.
 
 ---
 
@@ -116,3 +116,18 @@ python qa_inspector_agent.py   # Runs live 12-parameter production audit
 - **Developer:** Revanth Acharya
 - **GitHub:** [@revanthh04](https://github.com/revanthh04)
 - **Live Bot:** [@Revu04_bot](https://t.me/Revu04_bot)
+
+
+## Regression testing and storage
+
+Run `python test_suite.py` or `python -m unittest discover -s tests -v` for the offline regression suite. It copies source files into a temporary workspace, uses synthetic records, and mocks external services. It does not run the Telegram bot or read local credentials.
+
+The original diagnostics are available only through `python test_suite.py --live`. They modify databases and the clipboard, call paid AI services, and can create or overwrite Google Sheets. They are not the default verification path.
+
+Access is closed by default (`OPEN_ACCESS=false`). The admin and IDs in `ALLOWED_USER_IDS` can use the bot; Gmail, Calendar, Sheets, LinkedIn, and workstation controls are admin-only. AI-provided user IDs cannot override the authenticated user. The admin's Google Sheet exports only the admin's records and is a **one-way SQLite export**, not a two-way database.
+
+`JARVIS_DATA_DIR` optionally selects the directory containing all six SQLite files, `data_vault_backup.json`, and `sheets_config.json`. If omitted, the project directory is used as before. Before switching directories, stop the bot and copy the existing databases and vault into the new directory, then restart one bot instance. Do not point it at an empty directory expecting an automatic migration.
+
+The checked-in Render blueprint still uses the free plan. Render documents that local files are lost on restarts, redeploys, and spin-downs, and that persistent disks require a paid service: [free service limitations](https://render.com/docs/free#local-files-lost-on-redeploy), [persistent disk setup](https://render.com/docs/disks). After provisioning a persistent mount such as `/var/data`, set `JARVIS_DATA_DIR` to that mount and migrate the existing data before starting the bot. A local vault alone is not an off-server backup.
+
+See [BUGFIX_REPORT.md](BUGFIX_REPORT.md) for verified fixes and remaining work.

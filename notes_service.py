@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 import config
 
-DB_FILE = os.path.join(os.path.dirname(__file__), "notes.db")
+DB_FILE = os.path.join(config.DATA_DIR, "notes.db")
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)

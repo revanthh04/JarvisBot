@@ -3,7 +3,7 @@ import os
 from datetime import datetime, date, timedelta
 import config
 
-DB_FILE = os.path.join(os.path.dirname(__file__), "habits.db")
+DB_FILE = os.path.join(config.DATA_DIR, "habits.db")
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -62,7 +62,7 @@ def add_habit(name: str, user_id: int = None) -> dict:
 def log_habit(name: str, log_date: str = None, user_id: int = None) -> dict:
     user_id = config.resolve_user_id(user_id)
     if not log_date:
-        log_date = date.today().isoformat()
+        log_date = datetime.now(config.get_tz()).date().isoformat()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("SELECT id, name FROM habits WHERE user_id = ? AND LOWER(name) = LOWER(?)", (user_id, name.strip()))
@@ -96,7 +96,7 @@ def get_habit_streaks(user_id: int = None) -> list:
     cursor.execute("SELECT id, name FROM habits WHERE user_id = ?", (user_id,))
     habits = cursor.fetchall()
     results = []
-    today = date.today()
+    today = datetime.now(config.get_tz()).date()
 
     for h_id, h_name in habits:
         cursor.execute("SELECT log_date FROM habit_logs WHERE habit_id = ? ORDER BY log_date DESC", (h_id,))

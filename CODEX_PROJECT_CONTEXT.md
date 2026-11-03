@@ -1,5 +1,7 @@
 # Project Codex: Jarvis (YoBot) Executive AI Assistant
 
+> Historical handoff. See BUGFIX_REPORT.md for the November 3, 2026 code audit, verified fixes, and limitations. Claims of working integrations below are from the handoff and were not all live-verified during the audit.
+
 ## 1. Project Overview & Identity
 - **Project Name:** YoBot / Jarvis Executive Assistant
 - **Target Platform:** Telegram Bot (`python-telegram-bot` v21+ with JobQueue & async polling)
@@ -166,7 +168,7 @@ All local persistent databases use SQLite3 and maintain automated backups via `b
 ## 4. Environment Variables (`.env`)
 
 ```env
-TELEGRAM_BOT_TOKEN=8628427747:AAG09v1HmZCDkybmSKjMUv8T25-12W0s45Y
+TELEGRAM_BOT_TOKEN=<your_telegram_bot_token>
 GEMINI_API_KEY=<your_google_gemini_key>
 OPENAI_API_KEY=<optional_openai_key>
 USER_TIMEZONE=Asia/Kolkata

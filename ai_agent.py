@@ -2,6 +2,7 @@ import os
 import re
 import logging
 import json
+import threading
 from datetime import datetime
 from google import genai
 from google.genai import types
@@ -26,7 +27,7 @@ import linkedin_service
 logger = logging.getLogger("YoBotAI")
 
 # Official modern Google GenAI Client
-genai_client = genai.Client(api_key=config.GEMINI_API_KEY)
+genai_client = genai.Client(api_key=config.GEMINI_API_KEY, http_options=types.HttpOptions(timeout=20000))
 
 # Initialize OpenAI client if API key is provided
 openai_client = None
@@ -116,6 +117,13 @@ def clean_jarvis_text(text: str) -> str:
 current_model_idx = 0
 chat_sessions = {}
 _last_date = None
+_agent_lock = threading.RLock()
+
+def get_available_tools():
+    if config.is_admin(config.get_current_user_id()):
+        return tools_list
+    private_modules = {"device_service", "calendar_service", "gmail_service", "sheets_service", "linkedin_service"}
+    return [tool for tool in tools_list if tool.__module__ not in private_modules]
 
 def get_current_model_name() -> str:
     global current_model_idx
@@ -195,7 +203,7 @@ def get_or_create_chat_session(user_id: int):
             model=model_name,
             config=types.GenerateContentConfig(
                 system_instruction=get_dynamic_system_prompt(),
-                tools=tools_list,
+                tools=get_available_tools(),
                 temperature=0.7
             )
         )
@@ -236,6 +244,11 @@ def query_openai(prompt: str) -> str:
         return None
 
 def query_gemini_agent(prompt: str) -> str:
+    # Scheduled briefings and Telegram messages can enter from different worker threads.
+    with _agent_lock:
+        return _query_gemini_agent(prompt)
+
+def _query_gemini_agent(prompt: str) -> str:
     global current_model_idx, chat_sessions
     user_id = config.get_current_user_id()
     attempts = 0
@@ -244,7 +257,8 @@ def query_gemini_agent(prompt: str) -> str:
     while attempts < max_attempts:
         try:
             session = get_or_create_chat_session(user_id)
-            response = session.send_message(prompt)
+            now = datetime.now(config.get_tz()).isoformat()
+            response = session.send_message(f"Current request time: {now}\n\n{prompt}")
             return clean_jarvis_text(response.text)
         except Exception as e:
             err_str = str(e).lower()
@@ -256,6 +270,25 @@ def query_gemini_agent(prompt: str) -> str:
 
     return "YoBot is temporarily unavailable. Please try again in a moment."
 
+def direct_request(prompt: str):
+    """Handle unambiguous requests without generative claims or API quota."""
+    text = prompt.strip().strip('"').strip().lower()
+    if re.fullmatch(r"(?:what(?:'s| is) (?:the )?)?(?:today(?:'s|s)? (?:date|data|datae)|(?:date|data|datae) of today)\s*[?!]*", text):
+        return f"Today is {datetime.now(config.get_tz()).strftime('%A, %B %d, %Y')} ({config.USER_TIMEZONE})."
+    if re.match(r"^(?:please\s+)?remind me\b", text):
+        return reminders_service.create_reminder(message=prompt.strip().strip('"'))["status"]
+    if re.fullmatch(r"(?:show (?:me )?)?(?:my |all my )?(?:expenses|spendings)(?: (?:till today|to date|on food|for food))?\s*[?!.]*", text):
+        result = expenses_service.search_expenses(category="Food" if "food" in text else "")
+        if not result["count"]:
+            return "No matching expenses are recorded in your ledger."
+        lines = [f"Recorded expenses: ₹{result['total_amount']:,.2f} across {result['count']} transactions."]
+        for row in result["entries"]:
+            lines.append(f"• {row['date']}: ₹{row['amount']:,.2f} — {row['description']} ({row['category']})")
+        if result["count"] > len(result["entries"]):
+            lines.append("Showing the latest 50 entries; the total includes all matching records.")
+        return "\n".join(lines)
+    return None
+
 def query_agent(prompt: str) -> str:
     """
     Intelligent dual-brain router:
@@ -263,18 +296,27 @@ def query_agent(prompt: str) -> str:
     - If conversational or general English coaching, tries OpenAI ChatGPT first (if funded).
     - If OpenAI is exhausted or fails, falls back instantly to Gemini pool without user interruption.
     """
+    direct = direct_request(prompt)
+    if direct is not None:
+        return direct
     action_keywords = [
         "expense", "spent", "spend", "remind", "reminder", "reminders", "alarm",
         "repeat", "recurring", "stop reminder", "water", "weather", "cricket",
         "calendar", "event", "birthday", "bday", "book", "reading", "page",
         "task", "habit", "lock", "clipboard", "volume", "battery",
         "system stats", "screenshot", "currency", "emi", "email", "sheet", "sheets",
-        "linkedin", "post"
+        "linkedin", "post", "note", "remember", "recall", "save", "record",
+        "search", "news", "price", "schedule", "meeting", "agenda", "briefing"
     ]
     prompt_lower = prompt.lower()
     requires_tools = any(kw in prompt_lower for kw in action_keywords)
 
-    if not requires_tools and openai_client and not _openai_quota_exhausted:
+    # Unknown requests and follow-ups may refer to personal data or actions.
+    # Only clearly conversational/English-practice requests use the tool-free client.
+    conversation_only = bool(re.fullmatch(r"\s*(hi|hello|hey|thanks|thank you)[!.\s]*", prompt_lower)) or bool(
+        re.match(r"\s*(practice english|help me practice english|correct my english|explain the grammar)\b", prompt_lower)
+    )
+    if conversation_only and not requires_tools and openai_client and not _openai_quota_exhausted:
         openai_res = query_openai(prompt)
         if openai_res:
             return openai_res
@@ -331,6 +373,16 @@ def analyze_audio(audio_bytes: bytes, prompt: str = "Listen to this audio voice 
             attempts += 1
             continue
     return "Voice processing temporarily unavailable due to API rate limits."
+
+def transcribe_audio(audio_bytes: bytes) -> str:
+    transcript = analyze_audio(
+        audio_bytes,
+        "Transcribe the spoken words accurately. Return only the transcript. "
+        "Do not answer the speaker or claim to perform actions.",
+    )
+    if not transcript or transcript.startswith("Voice processing temporarily unavailable"):
+        raise RuntimeError("Could not transcribe this voice message. Please try again.")
+    return transcript
 
 def parse_receipt_image(image_bytes: bytes) -> dict:
     prompt = """Analyze this receipt or bill image. Extract the following JSON details:

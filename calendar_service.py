@@ -1,7 +1,9 @@
+import config
 import os
 from datetime import datetime, timedelta
 import pytz
 
+@config.require_admin
 def get_calendar_events(query: str = "", max_results: int = 15) -> str:
     token_path = os.path.join(os.path.dirname(__file__), "token.json")
     if not os.path.exists(token_path):
@@ -57,6 +59,7 @@ def get_calendar_events(query: str = "", max_results: int = 15) -> str:
     except Exception as e:
         return f"Calendar retrieval error: {e}"
 
+@config.require_admin
 def add_calendar_event(summary: str, start_time_str: str, duration_minutes: int = 60) -> str:
     token_path = os.path.join(os.path.dirname(__file__), "token.json")
     if not os.path.exists(token_path):
@@ -89,10 +92,10 @@ def add_calendar_event(summary: str, start_time_str: str, duration_minutes: int 
                 if start_dt.tzinfo is None:
                     start_dt = tz.localize(start_dt)
             except Exception:
-                # Default to tomorrow at 10 AM if unparseable
-                now = datetime.now(tz)
-                start_dt = (now + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+                return "Invalid event time. Please provide a date and time; no event was created."
 
+        if duration_minutes <= 0:
+            return "Event duration must be positive; no event was created."
         end_dt = start_dt + timedelta(minutes=duration_minutes)
 
         event = {

@@ -5,7 +5,7 @@ import re
 import json
 import config
 
-DB_FILE = os.path.join(os.path.dirname(__file__), "expenses.db")
+DB_FILE = os.path.join(config.DATA_DIR, "expenses.db")
 
 def normalize_expense_date(d_str: str = None) -> str:
     """
@@ -110,7 +110,7 @@ def log_expense(amount: float, category: str = "General", description: str = "",
 
 def get_monthly_summary(month: int = None, year: int = None, user_id: int = None) -> dict:
     user_id = config.resolve_user_id(user_id)
-    today = date.today()
+    today = datetime.now(config.get_tz()).date()
     try:
         month_int = int(float(month)) if month else today.month
     except Exception:
@@ -167,6 +167,8 @@ def search_expenses(category: str = "", query: str = "", date_str: str = "", use
         sql += " AND (expense_date = ? OR expense_date = ?)"
         params.extend([norm_date, str(date_str).strip()])
         
+    cursor.execute(sql.replace("SELECT id, amount, category, description, expense_date", "SELECT COUNT(*), COALESCE(SUM(amount), 0)"), tuple(params))
+    full_count, full_total = cursor.fetchone()
     sql += " ORDER BY expense_date DESC, id DESC LIMIT 50"
     
     cursor.execute(sql, tuple(params))
@@ -177,8 +179,8 @@ def search_expenses(category: str = "", query: str = "", date_str: str = "", use
     entries = [{"id": r[0], "amount": r[1], "category": r[2], "description": r[3], "date": r[4]} for r in rows]
     
     return {
-        "count": len(entries),
-        "total_amount": round(total, 2),
+        "count": full_count,
+        "total_amount": round(full_total, 2),
         "entries": entries
     }
 

@@ -1,3 +1,4 @@
+import config
 import os
 import sqlite3
 import json
@@ -10,7 +11,7 @@ logger = logging.getLogger("SheetsSync")
 
 BASE_DIR = os.path.dirname(__file__)
 TOKEN_FILE = os.path.join(BASE_DIR, "token.json")
-CONFIG_FILE = os.path.join(BASE_DIR, "sheets_config.json")
+CONFIG_FILE = os.path.join(config.DATA_DIR, "sheets_config.json")
 
 # Debounce lock and timer for background non-blocking synchronization
 _sync_lock = threading.Lock()
@@ -20,28 +21,28 @@ _is_syncing = False
 SHEET_TABS = {
     "Expenses": {
         "headers": ["ID", "Date", "Category", "Amount (₹)", "Description", "User ID", "Logged At"],
-        "db": os.path.join(BASE_DIR, "expenses.db"),
-        "query": "SELECT id, expense_date, category, amount, description, user_id, created_at FROM expenses ORDER BY id ASC"
+        "db": os.path.join(config.DATA_DIR, "expenses.db"),
+        "query": "SELECT id, expense_date, category, amount, description, user_id, created_at FROM expenses WHERE user_id = ? ORDER BY id ASC"
     },
     "Tasks": {
         "headers": ["ID", "Title", "Due Date", "Status", "Created At"],
-        "db": os.path.join(BASE_DIR, "tasks.db"),
-        "query": "SELECT id, title, due_date, completed, created_at FROM tasks ORDER BY id ASC"
+        "db": os.path.join(config.DATA_DIR, "tasks.db"),
+        "query": "SELECT id, title, due_date, completed, created_at FROM tasks WHERE user_id = ? ORDER BY id ASC"
     },
     "Habits": {
         "headers": ["ID", "Habit Name", "Total Days Logged", "Created At"],
-        "db": os.path.join(BASE_DIR, "habits.db"),
-        "query": "SELECT id, name, created_at FROM habits ORDER BY id ASC"
+        "db": os.path.join(config.DATA_DIR, "habits.db"),
+        "query": "SELECT id, name, created_at FROM habits WHERE user_id = ? ORDER BY id ASC"
     },
     "Books": {
         "headers": ["ID", "Title", "Author", "Status", "Current Page", "Total Pages", "Rating", "Notes", "Updated At"],
-        "db": os.path.join(BASE_DIR, "books.db"),
-        "query": "SELECT id, title, author, status, current_page, total_pages, rating, notes, updated_at FROM books ORDER BY id ASC"
+        "db": os.path.join(config.DATA_DIR, "books.db"),
+        "query": "SELECT id, title, author, status, current_page, total_pages, rating, notes, updated_at FROM books WHERE user_id = ? ORDER BY id ASC"
     },
     "Notes": {
         "headers": ["ID", "Title", "Content", "Tags", "Created At"],
-        "db": os.path.join(BASE_DIR, "notes.db"),
-        "query": "SELECT id, title, content, tags, created_at FROM notes ORDER BY id ASC"
+        "db": os.path.join(config.DATA_DIR, "notes.db"),
+        "query": "SELECT id, title, content, tags, created_at FROM notes WHERE user_id = ? ORDER BY id ASC"
     }
 }
 
@@ -61,6 +62,7 @@ def save_sheet_config(cfg: dict):
     except Exception as e:
         logger.warning(f"Could not save sheets_config.json: {e}")
 
+@config.require_admin
 def get_spreadsheet_id() -> Optional[str]:
     # Check environment variable first
     env_id = os.getenv("GOOGLE_SPREADSHEET_ID", "").strip()
@@ -69,12 +71,14 @@ def get_spreadsheet_id() -> Optional[str]:
     cfg = load_sheet_config()
     return cfg.get("spreadsheet_id")
 
+@config.require_admin
 def get_spreadsheet_url() -> Optional[str]:
     sid = get_spreadsheet_id()
     if sid:
         return f"https://docs.google.com/spreadsheets/d/{sid}/edit"
     return None
 
+@config.require_admin
 def get_credentials():
     """
     Retrieves and refreshes authorized Google OAuth credentials from token.json.
@@ -130,8 +134,8 @@ def ensure_spreadsheet(service) -> Tuple[Optional[str], Optional[str]]:
             # Verify existence
             service.spreadsheets().get(spreadsheetId=sid).execute()
             return sid, None
-        except Exception:
-            logger.warning(f"Configured spreadsheet ID {sid} inaccessible. Will create a new one.")
+        except Exception as exc:
+            return None, f"Configured spreadsheet is inaccessible: {exc}"
 
     # Create new Spreadsheet
     try:
@@ -167,7 +171,7 @@ def ensure_spreadsheet(service) -> Tuple[Optional[str], Optional[str]]:
         service.spreadsheets().values().batchUpdate(
             spreadsheetId=new_sid,
             body={
-                "valueInputOption": "USER_ENTERED",
+                "valueInputOption": "RAW",
                 "data": header_updates
             }
         ).execute()
@@ -177,21 +181,23 @@ def ensure_spreadsheet(service) -> Tuple[Optional[str], Optional[str]]:
         logger.error(f"Failed to create Google Spreadsheet: {e}")
         return None, str(e)
 
+@config.require_admin
 def extract_table_data(tab_name: str) -> list:
     """
     Pulls data rows from the corresponding SQLite database for Google Sheets.
     """
     meta = SHEET_TABS.get(tab_name)
     if not meta or not os.path.exists(meta["db"]):
-        return []
+        raise FileNotFoundError(f"Source database missing for {tab_name}")
 
     rows = []
+    conn = None
     try:
         conn = sqlite3.connect(meta["db"])
         cursor = conn.cursor()
 
         if tab_name == "Expenses":
-            cursor.execute(meta["query"])
+            cursor.execute(meta["query"], (config.ADMIN_USER_ID,))
             for r in cursor.fetchall():
                 # [id, expense_date, category, amount, description, user_id, created_at]
                 rows.append([
@@ -204,7 +210,7 @@ def extract_table_data(tab_name: str) -> list:
                     str(r[6] or "")
                 ])
         elif tab_name == "Tasks":
-            cursor.execute(meta["query"])
+            cursor.execute(meta["query"], (config.ADMIN_USER_ID,))
             for r in cursor.fetchall():
                 # [id, title, due_date, completed, created_at]
                 rows.append([
@@ -215,7 +221,7 @@ def extract_table_data(tab_name: str) -> list:
                     str(r[4] or "")
                 ])
         elif tab_name == "Habits":
-            cursor.execute(meta["query"])
+            cursor.execute(meta["query"], (config.ADMIN_USER_ID,))
             habits = cursor.fetchall()
             for h in habits:
                 h_id, name, created_at = h[0], h[1], h[2]
@@ -227,7 +233,7 @@ def extract_table_data(tab_name: str) -> list:
                     count = 0
                 rows.append([h_id, str(name or ""), count, str(created_at or "")])
         elif tab_name == "Books":
-            cursor.execute(meta["query"])
+            cursor.execute(meta["query"], (config.ADMIN_USER_ID,))
             for r in cursor.fetchall():
                 # [id, title, author, status, current_page, total_pages, rating, notes, updated_at]
                 rows.append([
@@ -242,7 +248,7 @@ def extract_table_data(tab_name: str) -> list:
                     str(r[8] or "")
                 ])
         elif tab_name == "Notes":
-            cursor.execute(meta["query"])
+            cursor.execute(meta["query"], (config.ADMIN_USER_ID,))
             for r in cursor.fetchall():
                 # [id, title, content, tags, created_at]
                 rows.append([
@@ -252,12 +258,16 @@ def extract_table_data(tab_name: str) -> list:
                     str(r[3] or "-"),
                     str(r[4] or "")
                 ])
-        conn.close()
     except Exception as e:
         logger.error(f"Error extracting data for {tab_name}: {e}")
+        raise
+    finally:
+        if conn is not None:
+            conn.close()
 
     return rows
 
+@config.require_admin
 def sync_all_to_sheets() -> Dict[str, Any]:
     """
     Executes a complete synchronization of all SQLite tables to Google Sheets in batch.
@@ -289,15 +299,6 @@ def sync_all_to_sheets() -> Dict[str, Any]:
         counts = {}
 
         for tab_name, meta in SHEET_TABS.items():
-            # Clear old rows below header
-            try:
-                service.spreadsheets().values().clear(
-                    spreadsheetId=sid,
-                    range=f"'{tab_name}'!A2:Z"
-                ).execute()
-            except Exception:
-                pass
-
             data_rows = extract_table_data(tab_name)
             counts[tab_name] = len(data_rows)
             if data_rows:
@@ -310,9 +311,16 @@ def sync_all_to_sheets() -> Dict[str, Any]:
             service.spreadsheets().values().batchUpdate(
                 spreadsheetId=sid,
                 body={
-                    "valueInputOption": "USER_ENTERED",
+                    "valueInputOption": "RAW",
                     "data": batch_data
                 }
+            ).execute()
+
+        # Remove stale trailing rows only after all source reads and replacement writes succeed.
+        for tab_name, count in counts.items():
+            service.spreadsheets().values().clear(
+                spreadsheetId=sid,
+                range=f"'{tab_name}'!A{count + 2}:Z"
             ).execute()
 
         # Update last synced record
@@ -341,7 +349,8 @@ def sync_all_to_sheets() -> Dict[str, Any]:
 
 def _run_background_sync():
     try:
-        sync_all_to_sheets()
+        with config.user_context(config.ADMIN_USER_ID, "Revanth Sir"):
+            sync_all_to_sheets()
     except Exception as e:
         logger.warning(f"Background sync notice: {e}")
 
@@ -359,6 +368,7 @@ def trigger_background_sync(delay_seconds: float = 3.0):
         _sync_timer.daemon = True
         _sync_timer.start()
 
+@config.require_admin
 def get_sync_status() -> dict:
     """
     Returns quick status summary of Google Sheets sync.
@@ -376,6 +386,7 @@ def get_sync_status() -> dict:
         "counts": cfg.get("counts", {})
     }
 
+@config.require_admin
 def get_sheets_link() -> str:
     """
     Returns the live Google Sheets URL for viewing expenses, tasks, habits, books, and notes.
@@ -388,6 +399,7 @@ def get_sheets_link() -> str:
         return "Google Sheets is pending one-time authorization. Run 'python setup_google.py' in your terminal to approve Google Sheets access."
     return "Google Sheets is not linked yet. Please run 'python setup_google.py' to link your Google account."
 
+@config.require_admin
 def sync_google_sheets() -> str:
     """
     Manually triggers an immediate full synchronization of all SQLite tables to Google Sheets.

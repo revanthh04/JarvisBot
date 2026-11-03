@@ -1,7 +1,37 @@
+import config
 import os
 import base64
 from email.mime.text import MIMEText
+from html import unescape
 
+def _message_body(payload: dict) -> str:
+    """Prefer plain text, including text nested inside multipart MIME bodies."""
+    plain, html = [], []
+    def visit(part):
+        if part.get("filename"):
+            return  # Attachments are not the email's body.
+        mime = part.get("mimeType", "")
+        data = part.get("body", {}).get("data")
+        if data and mime in ("text/plain", "text/html"):
+            decoded = base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+            content_type = next((h["value"] for h in part.get("headers", [])
+                                 if h.get("name", "").lower() == "content-type"), mime)
+            from email.message import Message
+            header = Message()
+            header["content-type"] = content_type
+            text = decoded.decode(header.get_content_charset() or "utf-8", errors="replace")
+            (plain if mime == "text/plain" else html).append(text)
+        for child in part.get("parts", []):
+            visit(child)
+    visit(payload)
+    if plain:
+        return "\n\n".join(plain)
+    if html:
+        from bs4 import BeautifulSoup
+        return BeautifulSoup("\n\n".join(html), "html.parser").get_text("\n", strip=True)
+    return ""
+
+@config.require_admin
 def list_emails(query: str = "is:unread", max_results: int = 5) -> list:
     token_path = os.path.join(os.path.dirname(__file__), "token.json")
     if not os.path.exists(token_path):
@@ -34,6 +64,7 @@ def list_emails(query: str = "is:unread", max_results: int = 5) -> list:
     except Exception as e:
         return [{"error": f"Gmail list error: {e}"}]
 
+@config.require_admin
 def read_email(msg_id: str) -> str:
     token_path = os.path.join(os.path.dirname(__file__), "token.json")
     if not os.path.exists(token_path):
@@ -42,7 +73,6 @@ def read_email(msg_id: str) -> str:
     try:
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
-        from bs4 import BeautifulSoup
 
         creds = Credentials.from_authorized_user_file(token_path)
         service = build("gmail", "v1", credentials=creds)
@@ -54,10 +84,14 @@ def read_email(msg_id: str) -> str:
         subject = headers.get("subject", "No Subject")
         sender = headers.get("from", "Unknown")
 
-        return f"From: {sender}\nSubject: {subject}\n\nSnippet:\n{snippet}"
+        body = _message_body(m.get("payload", {}))
+        if body:
+            return f"From: {sender}\nSubject: {subject}\n\n{body}"
+        return f"From: {sender}\nSubject: {subject}\n\nPreview (full body unavailable):\n{unescape(snippet)}"
     except Exception as e:
         return f"Failed to read email {msg_id}: {e}"
 
+@config.require_admin
 def send_email(to: str, subject: str, body: str) -> str:
     token_path = os.path.join(os.path.dirname(__file__), "token.json")
     if not os.path.exists(token_path):

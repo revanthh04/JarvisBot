@@ -1,9 +1,11 @@
+import config
 import platform
 import psutil
 import io
 import os
 import subprocess
 
+@config.require_admin
 def get_system_stats() -> dict:
     cpu_percent = psutil.cpu_percent(interval=0.5)
     mem = psutil.virtual_memory()
@@ -22,6 +24,7 @@ def get_system_stats() -> dict:
         "battery": battery_info
     }
 
+@config.require_admin
 def take_screenshot() -> bytes:
     if platform.system() != "Windows":
         raise RuntimeError("Desktop screenshots require Jarvis to run locally on your PC (Currently hosted on Cloud Linux).")
@@ -36,12 +39,14 @@ def take_screenshot() -> bytes:
     except Exception as e:
         raise RuntimeError(f"Screenshot failed: {e}")
 
+@config.require_admin
 def lock_workstation() -> bool:
     if platform.system() == "Windows":
         import ctypes
         return bool(ctypes.windll.user32.LockWorkStation())
     return False
 
+@config.require_admin
 def set_volume(action: str) -> str:
     """Action: mute, unmute, up, down"""
     if platform.system() != "Windows":
@@ -58,6 +63,7 @@ def set_volume(action: str) -> str:
         return f"Volume action '{action}' executed."
     return f"Volume action '{action}' executed."
 
+@config.require_admin
 def get_clipboard() -> str:
     if platform.system() == "Windows":
         try:
@@ -67,6 +73,7 @@ def get_clipboard() -> str:
             return f"Error reading clipboard: {e}"
     return "Clipboard access requires Jarvis to run locally on your PC."
 
+@config.require_admin
 def set_clipboard(text: str) -> str:
     if platform.system() == "Windows":
         try:

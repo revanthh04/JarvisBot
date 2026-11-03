@@ -1,3 +1,8 @@
+# Legacy script performs live writes and sends Telegram alerts. Never run implicitly.
+import sys
+if __name__ != "__main__" or "--live" not in sys.argv:
+    raise SystemExit("Live QA is disabled by default. Use the offline test_suite.py instead. Explicit --live is required for legacy QA.")
+
 import sys
 import os
 import sqlite3

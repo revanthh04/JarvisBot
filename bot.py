@@ -7,6 +7,7 @@ from datetime import time
 import tempfile
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
+from html import escape
 
 from telegram import Update
 from telegram.constants import ParseMode
@@ -170,8 +171,8 @@ def restricted(func):
         name = user.first_name or "Friend"
         if config.is_admin(user_id):
             name = "Revanth Sir"
-        config.set_current_user(user_id, name)
-        return await func(update, context, *args, **kwargs)
+        with config.user_context(user_id, name):
+            return await func(update, context, *args, **kwargs)
     return wrapper
 
 def admin_only(func):
@@ -180,7 +181,7 @@ def admin_only(func):
         if not config.is_admin(user_id):
             logger.warning(f"Non-admin user {user_id} attempted admin command {func.__name__}")
             if update.message:
-                await update.message.reply_text("⛔ Workstation hardware and device controls are private and restricted to Revanth Sir.")
+                await update.message.reply_text("⛔ This integration is private and restricted to Revanth Sir.")
             return
         return await func(update, context, *args, **kwargs)
     return wrapper
@@ -411,11 +412,13 @@ async def cmd_convert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_rich_reply(update, "Usage: `/convert 100 USD INR`")
 
 @restricted
+@admin_only
 async def cmd_agenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     events = calendar_service.get_calendar_events()
     await send_rich_reply(update, f"📅 {events}")
 
 @restricted
+@admin_only
 async def cmd_emails(update: Update, context: ContextTypes.DEFAULT_TYPE):
     emails = gmail_service.list_emails(query="is:unread", max_results=5)
     if not emails:
@@ -435,6 +438,7 @@ async def cmd_emails(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_rich_reply(update, "\n".join(lines))
 
 @restricted
+@admin_only
 async def cmd_linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
@@ -547,12 +551,15 @@ async def cmd_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @restricted
 @admin_only
 async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    backup_service.backup_all_databases()
+    result = backup_service.backup_all_databases()
+    if result.get("status") != "success":
+        await send_rich_reply(update, "⚠️ Backup failed. The previous vault was preserved; check the server logs.")
+        return
     status = backup_service.get_vault_status()
     act = status.get("active_sqlite_records", {})
     text = (
         "🛡️ **Data Guardian Vault Status**\n\n"
-        "All data is automatically backed up and protected against server restarts:\n"
+        "A local snapshot was written successfully:\n"
         f"• **Food & Expenses:** {act.get('expenses', 0)} records\n"
         f"• **Books Library:** {act.get('books', 0)} books\n"
         f"• **Notes:** {act.get('notes', 0)} notes\n"
@@ -560,11 +567,12 @@ async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• **Reminders:** {act.get('reminders', 0)} active\n"
         f"• **Total Vault Records:** {status.get('vault_records', 0)}\n"
         f"• **Last Snapshot:** `{status.get('last_backup', 'Just now')[:19]}`\n\n"
-        "✅ *Vault integrity 100% verified.*"
+        "Cloud recovery requires persistent storage for the databases and vault."
     )
     await send_rich_reply(update, text)
 
 @restricted
+@admin_only
 async def cmd_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = sheets_service.get_sync_status()
     url = status.get("url")
@@ -605,6 +613,7 @@ async def cmd_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_rich_reply(update, text)
 
 @restricted
+@admin_only
 async def cmd_syncsheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_rich_reply(update, "⏳ Synchronizing all SQLite databases to Google Sheets...")
     res = sheets_service.sync_all_to_sheets()
@@ -626,7 +635,8 @@ async def cmd_syncsheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def scheduled_sheets_sync_job(context: ContextTypes.DEFAULT_TYPE):
     try:
-        sheets_service.sync_all_to_sheets()
+        with config.user_context(config.ADMIN_USER_ID, "Revanth Sir"):
+            await asyncio.to_thread(sheets_service.sync_all_to_sheets)
     except Exception as e:
         logger.debug(f"Periodic Google Sheets background sync notice: {e}")
 
@@ -646,14 +656,18 @@ async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_briefing_to_user(context, update.effective_user.id)
 
 async def send_briefing_to_user(context: ContextTypes.DEFAULT_TYPE, user_id: int):
-    weather = weather_service.get_weather("Hyderabad")
+    with config.user_context(user_id, "Revanth Sir" if config.is_admin(user_id) else "User"):
+        await _send_briefing(context, user_id)
+
+async def _send_briefing(context, user_id):
+    weather = await asyncio.to_thread(weather_service.get_weather, "Hyderabad")
     w_line = f"🌤️ {weather.get('condition', 'Clear')} at {weather.get('temp_c', '')} in Hyderabad."
     
     tasks = tasks_service.list_tasks(completed=False)
     task_str = f"You have {len(tasks)} pending tasks." if tasks else "No pending tasks."
 
-    briefing_prompt = f"Give a brisk, sharp, motivating executive morning briefing to Revanth. Weather today: {w_line}. Tasks: {task_str}."
-    response = ai_agent.query_agent(briefing_prompt)
+    briefing_prompt = f"Give a brief morning briefing to {config.get_current_user_name()}. Weather today: {w_line}. Tasks: {task_str}."
+    response = await asyncio.to_thread(ai_agent.query_agent, briefing_prompt)
 
     try:
         html_msg = markdown_to_telegram_html(f"🌅 **Executive Morning Briefing**\n\n{response}")
@@ -670,20 +684,23 @@ async def check_reminders_job(context: ContextTypes.DEFAULT_TYPE):
         user_id = rem["user_id"]
         recipient_title = "REVANTH SIR" if config.is_admin(user_id) else "YOU"
 
+        reminder_text = escape(rem["message"])
         if is_rec and interval > 0:
-            next_time = reminders_service.reschedule_recurring_reminder(rem_id, interval)
             msg = (
                 f"⏰ <b>RECURRING REMINDER FOR {recipient_title}</b>\n\n"
-                f"• {rem['message']}\n\n"
-                f"<i>(Repeats every {interval} mins • Next reminder at {next_time})\n"
-                f"To stop: tell YoBot 'stop {rem['message']}' or send /remind stop</i>"
+                f"• {reminder_text}\n\n"
+                f"<i>Repeats every {interval} mins.\n"
+                f"To stop: tell YoBot 'stop {reminder_text}' or send /remind stop</i>"
             )
         else:
-            reminders_service.mark_reminder_triggered(rem_id)
-            msg = f"⏰ <b>REMINDER FOR {recipient_title}</b>\n\n• {rem['message']}"
+            msg = f"⏰ <b>REMINDER FOR {recipient_title}</b>\n\n• {reminder_text}"
 
         try:
             await context.bot.send_message(chat_id=user_id, text=msg, parse_mode=ParseMode.HTML)
+            if is_rec and interval > 0:
+                reminders_service.reschedule_recurring_reminder(rem_id, interval)
+            else:
+                reminders_service.mark_reminder_triggered(rem_id)
         except Exception as e:
             logger.error(f"Failed to send reminder {rem_id} to user {user_id}: {e}")
 
@@ -693,9 +710,12 @@ async def scheduled_morning_briefing(context: ContextTypes.DEFAULT_TYPE):
         await send_briefing_to_user(context, uid)
 
 async def scheduled_evening_habits(context: ContextTypes.DEFAULT_TYPE):
-    habits = habits_service.list_habits()
-    uncompleted = [h['name'] for h in habits if not h['completed_today']]
     for uid in config.ALLOWED_USER_IDS:
+        with config.user_context(uid):
+            habits = habits_service.list_habits()
+        uncompleted = [h['name'] for h in habits if not h['completed_today']]
+        if not habits:
+            continue
         if uncompleted:
             msg = f"🌙 **Evening Habit Check-In**\n\nYou still have pending habits today:\n" + "\n".join([f"• {h}" for h in uncompleted]) + "\n\nReply 'I did [habit]' to log your streak!"
         else:
@@ -758,7 +778,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    reply = ai_agent.query_agent(user_msg)
+    reply = await asyncio.to_thread(ai_agent.query_agent, user_msg)
     await send_rich_reply(update, reply)
 
 # Voice Note Handler (Transcribe -> Reason -> Speak back)
@@ -774,7 +794,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     audio_data = bio.getvalue()
 
     try:
-        reply_text = ai_agent.analyze_audio(audio_data)
+        transcript = await asyncio.to_thread(ai_agent.transcribe_audio, audio_data)
+        reply_text = await asyncio.to_thread(ai_agent.query_agent, transcript)
         
         reply_audio = await voice_service.text_to_speech(reply_text)
         try:
@@ -800,11 +821,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     caption = update.message.caption or ""
     if "receipt" in caption.lower() or "bill" in caption.lower() or "expense" in caption.lower():
-        res = ai_agent.parse_receipt_image(photo_bytes)
+        res = await asyncio.to_thread(ai_agent.parse_receipt_image, photo_bytes)
         await send_rich_reply(update, res.get("message", "Processed receipt."))
     else:
         query = caption if caption else "Analyze this image and describe what it contains."
-        res = ai_agent.analyze_image(photo_bytes, query)
+        res = await asyncio.to_thread(ai_agent.analyze_image, photo_bytes, query)
         await send_rich_reply(update, res)
 
 def main():
@@ -835,7 +856,7 @@ def main():
     app.add_handler(CommandHandler("tasks", cmd_tasks))
     app.add_handler(CommandHandler("notes", cmd_notes))
     app.add_handler(CommandHandler("books", cmd_books))
-    app.add_handler(CommandHandler("expenses", cmd_expenses))
+    app.add_handler(CommandHandler(["expenses", "expences", "expense"], cmd_expenses))
     app.add_handler(CommandHandler(["sheets", "sheet"], cmd_sheets))
     app.add_handler(CommandHandler("syncsheets", cmd_syncsheets))
     app.add_handler(CommandHandler(["backup", "vault"], cmd_backup))

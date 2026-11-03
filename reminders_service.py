@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import pytz
 import config
 
-DB_FILE = os.path.join(os.path.dirname(__file__), "reminders.db")
+DB_FILE = os.path.join(config.DATA_DIR, "reminders.db")
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -90,6 +90,10 @@ def create_reminder(
     tz = config.get_tz()
     now = datetime.now(tz)
     combined_search_text = f"{message} {time_str}".lower()
+    def invalid_time():
+        return {"success": False, "status": "Please provide a valid future time or a positive reminder interval. No reminder was created."}
+    if delay_minutes < 0 or repeat_interval_minutes < 0:
+        return invalid_time()
 
     # Detect interval pattern in message or time_str
     detected_interval = 0
@@ -116,6 +120,8 @@ def create_reminder(
 
     if repeat_interval_minutes > 0:
         is_recurring = True
+    if (is_recurring or re.search(r'\bevery\b', combined_search_text)) and repeat_interval_minutes <= 0:
+        return invalid_time()
 
     # Normalize time separators (e.g. 1;20 or 1.20 -> 1:20)
     norm_msg = re.sub(r'(\d{1,2})[;.](\d{2})', r'\1:\2', message)
@@ -140,8 +146,8 @@ def create_reminder(
         remind_dt = now + timedelta(minutes=delay_minutes)
     elif time_str:
         time_clean = time_str.strip().lower()
-        has_am = bool(re.search(r'\bam\b', time_clean))
-        has_pm = bool(re.search(r'\bpm\b', time_clean))
+        has_am = time_clean.endswith("am")
+        has_pm = time_clean.endswith("pm")
 
         match_min = re.search(r'(\d+)\s*(?:m|min|minute|minutes)', time_clean)
         match_hr = re.search(r'(\d+)\s*(?:h|hr|hour|hours)', time_clean)
@@ -154,14 +160,14 @@ def create_reminder(
             remind_dt = now + timedelta(minutes=mins)
         else:
             time_upper = time_clean.upper()
-            for fmt in ["%H:%M", "%I:%M %p", "%I:%M%p", "%I %p", "%H"]:
+            for fmt in ["%H:%M", "%I:%M %p", "%I:%M%p", "%I %p", "%I%p", "%H"]:
                 try:
                     parsed = datetime.strptime(time_upper, fmt)
                     h = parsed.hour
                     m = parsed.minute
 
                     # Smart 12-hour resolution if AM/PM was omitted
-                    if not has_am and not has_pm and h < 12:
+                    if not has_am and not has_pm and 0 < h < 12:
                         dt_am = now.replace(hour=h, minute=m, second=0, microsecond=0)
                         dt_pm = now.replace(hour=h + 12, minute=m, second=0, microsecond=0)
                         # If current time is late morning, afternoon, or evening (>= 11:00 AM)
@@ -197,10 +203,16 @@ def create_reminder(
 
     # If recurring and no specific first time specified, first trigger fires in repeat_interval_minutes
     if not remind_dt:
-        if is_recurring and repeat_interval_minutes > 0:
+        if is_recurring and repeat_interval_minutes > 0 and (not time_str or re.fullmatch(r'every\s+.+|daily', time_str.strip(), re.IGNORECASE)):
             remind_dt = now + timedelta(minutes=repeat_interval_minutes)
         else:
-            remind_dt = now + timedelta(minutes=10)
+            return invalid_time()
+
+    if re.search(r'\btomorrow\b', combined_search_text):
+        tomorrow = now.date() + timedelta(days=1)
+        remind_dt = tz.localize(datetime.combine(tomorrow, remind_dt.time().replace(tzinfo=None)))
+    if remind_dt <= now:
+        return invalid_time()
 
     clean_msg = _clean_reminder_message(message)
     user_id = config.resolve_user_id(user_id)
@@ -305,6 +317,12 @@ def reschedule_recurring_reminder(reminder_id: int, interval_minutes: int) -> st
     """, (next_remind_iso, now_iso, reminder_id))
     conn.commit()
     conn.close()
+
+    try:
+        import backup_service
+        backup_service.backup_all_databases()
+    except Exception:
+        pass
 
     return next_remind_dt.strftime("%I:%M %p")
 

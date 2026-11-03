@@ -7,6 +7,7 @@ logger = logging.getLogger("YoBotLinkedIn")
 
 _CACHED_PERSON_URN = None
 
+@config.require_admin
 def get_author_urn(token: str) -> str:
     global _CACHED_PERSON_URN
     if config.LINKEDIN_PERSON_URN:
@@ -47,6 +48,7 @@ def get_author_urn(token: str) -> str:
 
     return ""
 
+@config.require_admin
 def get_linkedin_profile() -> str:
     """
     Checks connection to LinkedIn and retrieves connected account details.
@@ -83,6 +85,7 @@ def get_linkedin_profile() -> str:
     except Exception as e:
         return f"Failed to connect to LinkedIn: {e}"
 
+@config.require_admin
 def post_to_linkedin(text: str) -> str:
     """
     Publishes an update or post to your LinkedIn profile feed.
