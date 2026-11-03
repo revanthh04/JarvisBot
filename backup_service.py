@@ -77,6 +77,12 @@ def backup_all_databases() -> dict:
     with open(VAULT_FILE, "w", encoding="utf-8") as f:
         json.dump(vault, f, indent=2, ensure_ascii=False)
 
+    try:
+        import sheets_service
+        sheets_service.trigger_background_sync()
+    except Exception as e:
+        logger.debug(f"Sheets background sync trigger notice: {e}")
+
     return {
         "status": "success",
         "total_records": total_records,
@@ -139,10 +145,12 @@ def restore_all_databases() -> dict:
                         import config
                         tz = config.get_tz()
                         dt_r = datetime.fromisoformat(r_at)
+                        if dt_r.tzinfo is None:
+                            dt_r = tz.localize(dt_r)
                         if dt_r < datetime.now(tz):
                             rec["triggered"] = 1
-                    except Exception:
-                        pass
+                    except Exception as ex:
+                        logger.debug(f"Reminder retirement check notice: {ex}")
 
             # Dynamically insert
             cols = [col for col in rec.keys() if col in info["columns"]]

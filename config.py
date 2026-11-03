@@ -11,6 +11,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 USER_TIMEZONE = os.getenv("USER_TIMEZONE", "Asia/Kolkata").strip()
 
+LINKEDIN_ACCESS_TOKEN = os.getenv("LINKEDIN_ACCESS_TOKEN", "").strip()
+LINKEDIN_PERSON_URN = os.getenv("LINKEDIN_PERSON_URN", "").strip()
+
 ADMIN_USER_ID = 5484600217
 OPEN_ACCESS = os.getenv("OPEN_ACCESS", "true").lower() in ("true", "1", "yes")
 

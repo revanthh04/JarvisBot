@@ -108,7 +108,7 @@ def log_expense(amount: float, category: str = "General", description: str = "",
         "status": f"Logged ₹{amount_num:,.2f} for '{description}' under {category} on {clean_date}."
     }
 
-def get_monthly_summary(month=None, year=None, user_id: int = None) -> dict:
+def get_monthly_summary(month: int = None, year: int = None, user_id: int = None) -> dict:
     user_id = config.resolve_user_id(user_id)
     today = date.today()
     try:

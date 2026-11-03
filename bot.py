@@ -34,6 +34,8 @@ import gmail_service
 import reminders_service
 import books_service
 import backup_service
+import sheets_service
+import linkedin_service
 
 # Logging setup
 logging.basicConfig(
@@ -205,11 +207,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• `/notes [query]` — Second Brain notes search\n"
             "• `/books` — Track reading list and book page progress\n"
             "• `/expenses` — View monthly expense ledger\n"
+            "• `/sheets` — Live Google Sheets spreadsheet dashboard link & status\n"
+            "• `/syncsheets` — Force sync all databases to Google Sheets\n"
             "• `/habits` — Habit streaks and daily check-ins\n"
             "• `/weather [city]` — Live weather forecast\n"
             "• `/cricket` — Live cricket scores\n"
             "• `/convert [amt] [from] [to]` — Currency conversion\n"
             "• `/agenda` — Google Calendar upcoming meetings\n"
+            "• `/emails` — Check recent unread Gmail messages\n"
+            "• `/linkedin [text]` — Post an update to LinkedIn or check status\n"
             "• `/briefing` — Trigger morning briefing\n"
             "• `/speak [text]` — Synthesize neural voice note\n\n"
             "💡 *You can also simply type or send voice memos in natural language!*"
@@ -410,6 +416,36 @@ async def cmd_agenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_rich_reply(update, f"📅 {events}")
 
 @restricted
+async def cmd_emails(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    emails = gmail_service.list_emails(query="is:unread", max_results=5)
+    if not emails:
+        await send_rich_reply(update, "📧 No unread emails found.")
+        return
+    if isinstance(emails, list) and len(emails) > 0 and "status" in emails[0]:
+        await send_rich_reply(update, f"📧 {emails[0]['status']}")
+        return
+    if isinstance(emails, list) and len(emails) > 0 and "error" in emails[0]:
+        await send_rich_reply(update, f"⚠️ {emails[0]['error']}")
+        return
+
+    lines = [f"📧 **Recent Unread Emails ({len(emails)}):**\n"]
+    for idx, e in enumerate(emails, 1):
+        lines.append(f"**{idx}. {e.get('subject', 'No Subject')}**\nFrom: `{e.get('from', 'Unknown')}`\nID: `{e.get('id', '')}`\n")
+    lines.append("_Tip: Say 'Read email [ID]' to view contents or 'Reply to email [ID]' to reply._")
+    await send_rich_reply(update, "\n".join(lines))
+
+@restricted
+async def cmd_linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if not args:
+        profile = linkedin_service.get_linkedin_profile()
+        await send_rich_reply(update, f"💼 **LinkedIn Status:**\n\n{profile}\n\n_To post an update: `/linkedin Excited to announce...`_")
+        return
+    text_to_post = " ".join(args)
+    res = linkedin_service.post_to_linkedin(text_to_post)
+    await send_rich_reply(update, res)
+
+@restricted
 async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
@@ -529,6 +565,72 @@ async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_rich_reply(update, text)
 
 @restricted
+async def cmd_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    status = sheets_service.get_sync_status()
+    url = status.get("url")
+    if not status.get("linked"):
+        if status.get("status_code") == "insufficient_scope":
+            msg = (
+                "📊 **Google Sheets Live Sync Pending Authorization**\n\n"
+                "Your Google OAuth token currently only has Calendar access and needs Sheets permission.\n\n"
+                "👉 **To connect Google Sheets:**\n"
+                "1. Run `python setup_google.py` in your terminal.\n"
+                "2. Sign in and grant access in the browser.\n\n"
+                "Once approved, all expenses, tasks, habits, books, and notes will sync live to your Google Sheet automatically!"
+            )
+        else:
+            msg = (
+                "📊 **Google Sheets Not Linked Yet**\n\n"
+                "Run `python setup_google.py` to link your Google account."
+            )
+        await send_rich_reply(update, msg)
+        return
+
+    counts = status.get("counts", {})
+    last_sync = status.get("last_sync", "Never")
+    if last_sync and len(last_sync) > 19:
+        last_sync = last_sync[:19].replace("T", " ")
+
+    text = (
+        "📊 **Google Sheets Live Second Brain**\n\n"
+        f"🔗 **Spreadsheet Link:** [Open in Google Sheets]({url})\n\n"
+        f"• **Expenses:** {counts.get('Expenses', 0)} synced\n"
+        f"• **Tasks:** {counts.get('Tasks', 0)} synced\n"
+        f"• **Habits:** {counts.get('Habits', 0)} synced\n"
+        f"• **Books:** {counts.get('Books', 0)} synced\n"
+        f"• **Notes:** {counts.get('Notes', 0)} synced\n"
+        f"• **Last Sync:** `{last_sync}`\n\n"
+        "💡 *Tip: Use `/syncsheets` to force an immediate refresh.*"
+    )
+    await send_rich_reply(update, text)
+
+@restricted
+async def cmd_syncsheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_rich_reply(update, "⏳ Synchronizing all SQLite databases to Google Sheets...")
+    res = sheets_service.sync_all_to_sheets()
+    if res.get("status") == "success":
+        counts = res.get("counts", {})
+        url = res.get("url")
+        text = (
+            "✅ **Google Sheets Sync Complete!**\n\n"
+            f"🔗 **Spreadsheet Link:** [Open in Google Sheets]({url})\n\n"
+            f"• **Expenses:** {counts.get('Expenses', 0)}\n"
+            f"• **Tasks:** {counts.get('Tasks', 0)}\n"
+            f"• **Habits:** {counts.get('Habits', 0)}\n"
+            f"• **Books:** {counts.get('Books', 0)}\n"
+            f"• **Notes:** {counts.get('Notes', 0)}"
+        )
+    else:
+        text = f"⚠️ **Sync notice:** {res.get('message', 'Failed to sync')}"
+    await send_rich_reply(update, text)
+
+async def scheduled_sheets_sync_job(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        sheets_service.sync_all_to_sheets()
+    except Exception as e:
+        logger.debug(f"Periodic Google Sheets background sync notice: {e}")
+
+@restricted
 async def cmd_speak(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = " ".join(context.args) if context.args else "Hello, YoBot is at your service."
     audio_path = await voice_service.text_to_speech(text)
@@ -608,8 +710,54 @@ async def scheduled_evening_habits(context: ContextTypes.DEFAULT_TYPE):
 @restricted
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_msg = update.message.text
+    if not user_msg:
+        return
+
+    # Instant normalization for backslash commands & aliases (e.g. \Expense, \expenses, \sheet)
+    trimmed = user_msg.strip()
+    if trimmed.startswith("\\") or trimmed.startswith("/"):
+        parts = trimmed[1:].split()
+        if parts:
+            cmd = parts[0].lower()
+            context.args = parts[1:]
+            if cmd in ["expense", "expenses"]:
+                await cmd_expenses(update, context)
+                return
+            elif cmd in ["sheet", "sheets"]:
+                await cmd_sheets(update, context)
+                return
+            elif cmd in ["syncsheets", "syncsheet"]:
+                await cmd_syncsheets(update, context)
+                return
+            elif cmd in ["task", "tasks"]:
+                await cmd_tasks(update, context)
+                return
+            elif cmd in ["habit", "habits"]:
+                await cmd_habits(update, context)
+                return
+            elif cmd in ["note", "notes"]:
+                await cmd_notes(update, context)
+                return
+            elif cmd in ["book", "books"]:
+                await cmd_books(update, context)
+                return
+            elif cmd in ["remind", "reminders", "reminder"]:
+                await cmd_remind(update, context)
+                return
+            elif cmd in ["weather"]:
+                await cmd_weather(update, context)
+                return
+            elif cmd in ["cricket"]:
+                await cmd_cricket(update, context)
+                return
+            elif cmd in ["briefing"]:
+                await cmd_briefing(update, context)
+                return
+            elif cmd in ["vault", "backup"]:
+                await cmd_backup(update, context)
+                return
+
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
-    
     reply = ai_agent.query_agent(user_msg)
     await send_rich_reply(update, reply)
 
@@ -688,12 +836,16 @@ def main():
     app.add_handler(CommandHandler("notes", cmd_notes))
     app.add_handler(CommandHandler("books", cmd_books))
     app.add_handler(CommandHandler("expenses", cmd_expenses))
+    app.add_handler(CommandHandler(["sheets", "sheet"], cmd_sheets))
+    app.add_handler(CommandHandler("syncsheets", cmd_syncsheets))
     app.add_handler(CommandHandler(["backup", "vault"], cmd_backup))
     app.add_handler(CommandHandler("habits", cmd_habits))
     app.add_handler(CommandHandler("weather", cmd_weather))
     app.add_handler(CommandHandler("cricket", cmd_cricket))
     app.add_handler(CommandHandler("convert", cmd_convert))
     app.add_handler(CommandHandler("agenda", cmd_agenda))
+    app.add_handler(CommandHandler(["emails", "email"], cmd_emails))
+    app.add_handler(CommandHandler("linkedin", cmd_linkedin))
     app.add_handler(CommandHandler("remind", cmd_remind))
     app.add_handler(CommandHandler("speak", cmd_speak))
     app.add_handler(CommandHandler("briefing", cmd_briefing))
@@ -710,6 +862,7 @@ def main():
         job_queue.run_daily(scheduled_morning_briefing, time(hour=8, minute=0, tzinfo=tz))
         job_queue.run_daily(scheduled_evening_habits, time(hour=21, minute=0, tzinfo=tz))
         job_queue.run_repeating(check_reminders_job, interval=15, first=5)
+        job_queue.run_repeating(scheduled_sheets_sync_job, interval=1800, first=60)
         logger.info("Daily proactive scheduled jobs & dynamic reminder engine registered.")
 
     print("==================================================")

@@ -164,12 +164,20 @@ def create_reminder(
                     if not has_am and not has_pm and h < 12:
                         dt_am = now.replace(hour=h, minute=m, second=0, microsecond=0)
                         dt_pm = now.replace(hour=h + 12, minute=m, second=0, microsecond=0)
-                        if dt_am < now and dt_pm >= now:
-                            remind_dt = dt_pm  # Target is this afternoon/evening!
-                        elif dt_am >= now:
-                            remind_dt = dt_am  # Target is this morning!
+                        # If current time is late morning, afternoon, or evening (>= 11:00 AM)
+                        if now.hour >= 11:
+                            if dt_pm >= now:
+                                remind_dt = dt_pm  # Target is today's afternoon/evening!
+                            elif dt_am > now:
+                                remind_dt = dt_am
+                            else:
+                                remind_dt = dt_pm + timedelta(days=1)  # Target is tomorrow afternoon/evening
                         else:
-                            remind_dt = dt_am + timedelta(days=1)  # Both today have passed, target tomorrow morning
+                            # It's early morning (< 11:00 AM)
+                            if dt_am >= now:
+                                remind_dt = dt_am  # Target is this morning
+                            else:
+                                remind_dt = dt_pm  # Target is this afternoon
                     else:
                         remind_dt = now.replace(hour=h, minute=m, second=0, microsecond=0)
                         if remind_dt < now:
@@ -214,7 +222,22 @@ def create_reminder(
     except Exception:
         pass
 
-    formatted_time = remind_dt.strftime("%I:%M %p")
+    diff_seconds = int((remind_dt - now).total_seconds())
+    if diff_seconds > 0:
+        hrs = diff_seconds // 3600
+        mins = (diff_seconds % 3600) // 60
+        if hrs > 0 and mins > 0:
+            rel_str = f"in {hrs}h {mins}m"
+        elif hrs > 0:
+            rel_str = f"in {hrs}h"
+        else:
+            rel_str = f"in {max(mins, 1)}m"
+    else:
+        rel_str = "now"
+
+    day_str = "Today" if remind_dt.date() == now.date() else remind_dt.strftime("%a, %b %d")
+    formatted_time = f"{day_str} at {remind_dt.strftime('%I:%M %p')} ({rel_str})"
+
     if is_recurring:
         status_text = (
             f"Recurring reminder active for '{clean_msg}'. "

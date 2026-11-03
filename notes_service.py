@@ -67,7 +67,7 @@ def list_notes(limit: int = 10, user_id: int = None) -> list:
     conn.close()
     return [{"id": r[0], "title": r[1], "content": r[2], "tags": r[3], "created_at": r[4]} for r in rows]
 
-def delete_note(note_id, user_id: int = None) -> bool:
+def delete_note(note_id: int, user_id: int = None) -> bool:
     user_id = config.resolve_user_id(user_id)
     try:
         note_id = int(float(note_id))

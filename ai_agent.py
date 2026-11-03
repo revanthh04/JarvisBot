@@ -1,7 +1,10 @@
 import os
 import re
 import logging
-import google.generativeai as genai
+import json
+from datetime import datetime
+from google import genai
+from google.genai import types
 import openai
 import config
 import notes_service
@@ -17,12 +20,17 @@ import calendar_service
 import gmail_service
 import reminders_service
 import books_service
+import sheets_service
+import linkedin_service
 
 logger = logging.getLogger("YoBotAI")
-genai.configure(api_key=config.GEMINI_API_KEY)
+
+# Official modern Google GenAI Client
+genai_client = genai.Client(api_key=config.GEMINI_API_KEY)
 
 # Initialize OpenAI client if API key is provided
 openai_client = None
+_openai_quota_exhausted = False
 if config.OPENAI_API_KEY:
     try:
         openai_client = openai.OpenAI(api_key=config.OPENAI_API_KEY)
@@ -30,18 +38,11 @@ if config.OPENAI_API_KEY:
     except Exception as e:
         logger.warning(f"Could not initialize OpenAI client: {e}")
 
-# Pool of available models in priority order for seamless quota fallback
+# Pool of high-speed modern models with active quota
 MODELS_POOL = [
-    "gemini-2.5-flash",
-    "gemini-flash-latest",
-    "gemini-2.5-flash-lite",
-    "gemini-3.7-flash",
-    "gemini-flash-lite-latest",
     "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-3.8-flash",
-    "gemini-3.5-flash",
-    "gemini-3.6-flash"
+    "gemini-3.6-flash",
+    "gemini-3.5-flash"
 ]
 
 tools_list = [
@@ -92,39 +93,14 @@ tools_list = [
     books_service.add_book,
     books_service.update_book_progress,
     books_service.list_books,
-    books_service.search_books
+    books_service.search_books,
+    # Google Sheets Live Database Sync
+    sheets_service.get_sheets_link,
+    sheets_service.sync_google_sheets,
+    # LinkedIn Integration
+    linkedin_service.post_to_linkedin,
+    linkedin_service.get_linkedin_profile
 ]
-
-SYSTEM_PROMPT = """You are YoBot, an elite executive personal AI assistant.
-Your executive user is Revanth Sir. Always address him with high respect as 'Revanth Sir'.
-You are loyal, efficient, hyper-precise, proactive, and completely factual.
-
-ANTI-HALLUCINATION & FACTUAL GROUNDING PROTOCOL:
-1. NEVER guess, assume, or hallucinate dates, facts, calendar events, birthdays, expenses, books, or notes.
-2. CALENDAR & SCHEDULE: When asked about events, schedule, meetings, or birthdays, ALWAYS invoke `calendar_service.get_calendar_events`. Report only what is returned by the tool.
-3. EXPENSES & FINANCIALS: When asked about spendings, amounts, or receipts, ALWAYS query `get_expenses_by_date` or `get_monthly_summary`. Never guess numbers.
-4. REMINDERS & RECURRING ALERTS: When asked to set a reminder or alarm, ALWAYS call `create_reminder`. If it repeats (e.g. 'every 20 mins', 'every hour', 'daily', 'every day'), set `repeat_interval_minutes` (e.g. 20) and `is_recurring=True`. When asked to stop or cancel reminders (e.g. 'stop water reminder', 'cancel reminder'), ALWAYS invoke `stop_recurring_reminders` or `delete_reminder`. Always report exact times and recurrence intervals.
-5. NOTES & MEMORY: When asked about anything previously noted or remembered, ALWAYS query `search_notes` or `list_notes`.
-6. LIVE REAL-TIME INFO: For stock prices, live news, or factual questions, ALWAYS call `search_web`.
-7. CRICKET: Always invoke `get_live_cricket_scores`.
-8. WEATHER: Always invoke `get_weather`.
-9. BOOKS & READING TRACKER: When asked about reading progress, books, or adding a new book to read, ALWAYS invoke `books_service` tools (`add_book`, `update_book_progress`, `list_books`, `search_books`). Never guess pages or reading status.
-10. If any information is not present in the database or search, clearly and respectfully tell Revanth Sir: "I searched your records, Revanth Sir, but that is not logged yet. Would you like me to record it now?" NEVER fabricate imaginary records.
-
-ENGLISH COMMUNICATION COACHING:
-1. You also serve as Revanth Sir's executive English communication coach.
-2. If Revanth Sir writes with minor grammar mistakes or colloquial phrasing, understand his request first, fulfill it, and offer a gentle, high-level English tip at the end (e.g. '💡 English phrasing: ...') when helpful.
-3. When asked for English practice, grammar critique, or vocabulary expansion, provide encouraging, refined executive feedback.
-
-CRITICAL FORMATTING INSTRUCTIONS:
-1. NEVER output triple asterisks '***' or quadruple asterisks.
-2. Format lists with clean dots (•) or clean numbers (1., 2.).
-3. Avoid markdown clutter. Keep replies neat, crisp, and executive.
-
-DATA PRIVACY & STORAGE INSTRUCTIONS:
-1. Only store notes, tasks, habits, expenses, or books when the user EXPLICITLY asks to record, note, log, or track something.
-2. Never store or invent dummy/sample data. All records in the database must belong strictly to Revanth Sir.
-"""
 
 def clean_jarvis_text(text: str) -> str:
     if not text:
@@ -146,7 +122,6 @@ def get_current_model_name() -> str:
     return MODELS_POOL[current_model_idx % len(MODELS_POOL)]
 
 def get_dynamic_system_prompt() -> str:
-    from datetime import datetime
     tz = config.get_tz()
     now = datetime.now(tz)
     date_str = now.strftime("%A, %B %d, %Y")
@@ -158,13 +133,14 @@ def get_dynamic_system_prompt() -> str:
         persona = (
             "You are YoBot, an elite executive personal AI assistant.\n"
             "Your executive user and master is Revanth Sir. Always address him with high respect as 'Revanth Sir'.\n"
-            "You are loyal, efficient, hyper-precise, proactive, and completely factual."
+            "You are decisive, hyper-precise, proactive, unwavering, and completely factual.\n"
+            "Speak with absolute confidence, authority, and conviction at all times. Never sound hesitant, apologetic, or insecure."
         )
     else:
         persona = (
-            f"You are an intelligent, friendly, executive personal AI assistant and English coach.\n"
+            f"You are an intelligent, friendly, executive personal AI assistant.\n"
             f"Your current user is {user_name}. Always address them politely and warmly by their name '{user_name}'.\n"
-            "Help them with tasks, expenses, notes, books, daily habits, reminders, and conversational English coaching."
+            "Help them with tasks, expenses, notes, books, daily habits, reminders, and questions with crisp clarity."
         )
 
     return f"""{persona}
@@ -172,19 +148,26 @@ def get_dynamic_system_prompt() -> str:
 ANTI-HALLUCINATION & FACTUAL GROUNDING PROTOCOL:
 1. NEVER guess, assume, or hallucinate dates, facts, calendar events, birthdays, expenses, books, or notes.
 2. CALENDAR & SCHEDULE: When asked about events, schedule, meetings, or birthdays, ALWAYS invoke `calendar_service.get_calendar_events`. Report only what is returned by the tool.
-3. EXPENSES & FINANCIALS: When asked about spendings, amounts, or receipts, ALWAYS query `get_expenses_by_date` or `get_monthly_summary`. Never guess numbers.
-4. REMINDERS & RECURRING ALERTS: When asked to set a reminder or alarm, ALWAYS call `create_reminder`. If it repeats (e.g. 'every 20 mins', 'every hour', 'daily', 'every day'), set `repeat_interval_minutes` (e.g. 20) and `is_recurring=True`. When asked to stop or cancel reminders (e.g. 'stop water reminder', 'cancel reminder'), ALWAYS invoke `stop_recurring_reminders` or `delete_reminder`. Always report exact times and recurrence intervals.
+3. EXPENSES & FINANCIALS: When asked about spendings, amounts, or receipts, ALWAYS query `get_expenses_by_date` or `get_monthly_summary`. When the user mentions an expense (e.g. 'spent 146 for lunch'), invoke `log_expense`. Never guess numbers.
+4. REMINDERS & RECURRING ALERTS: When asked to set a reminder or alarm, ALWAYS call `create_reminder`.
+   - Pass the clean event name in `message` (e.g. 'Lunch', 'Drink water', 'Review budget').
+   - Pass explicit time in `time_str` (e.g. '01:20 PM', '07:45 PM').
+   - If it repeats (e.g. 'every 20 mins', 'every hour', 'daily'), set `repeat_interval_minutes` and `is_recurring=True`.
+   - When asked to stop or cancel reminders, ALWAYS invoke `stop_recurring_reminders` or `delete_reminder`.
 5. NOTES & MEMORY: When asked about anything previously noted or remembered, ALWAYS query `search_notes` or `list_notes`.
 6. LIVE REAL-TIME INFO: For stock prices, live news, or factual questions, ALWAYS call `search_web`.
 7. CRICKET: Always invoke `get_live_cricket_scores`.
 8. WEATHER: Always invoke `get_weather`.
-9. BOOKS & READING TRACKER: When asked about reading progress, books, or adding a new book to read, ALWAYS invoke `books_service` tools (`add_book`, `update_book_progress`, `list_books`, `search_books`). Never guess pages or reading status.
-10. If any information is not present in the database or search, clearly tell the user that the information is not logged yet. NEVER fabricate imaginary records.
+9. BOOKS & READING TRACKER: When asked about reading progress, books, or adding a new book to read, ALWAYS invoke `books_service` tools.
+10. GOOGLE SHEETS LIVE DATABASE: When asked to view, open, check, or link the Google Sheet, or sync records to Google Sheets, invoke `sheets_service.get_sheets_link` or `sheets_service.sync_google_sheets`.
+11. LINKEDIN: When asked to share/publish a post on LinkedIn or check LinkedIn profile status, invoke `linkedin_service.post_to_linkedin` or `linkedin_service.get_linkedin_profile`.
+12. GMAIL & EMAILS: When asked about unread emails, listing emails, reading a message, or sending an email, ALWAYS invoke `gmail_service.list_emails`, `read_email`, or `send_email`.
+13. If any information is not present in the database or search, clearly tell the user that the information is not logged yet. NEVER fabricate imaginary records.
 
-ENGLISH COMMUNICATION COACHING:
-1. You also serve as the user's executive English communication coach.
-2. If the user writes with minor grammar mistakes or colloquial phrasing, understand their request first, fulfill it, and offer a gentle, helpful English phrasing tip at the end (e.g. '💡 English phrasing: ...') when appropriate.
-3. When asked for English practice, grammar critique, or vocabulary expansion, provide encouraging, refined feedback.
+COMMUNICATION PROTOCOL:
+1. Speak with supreme confidence, crisp clarity, and decisive authority.
+2. Fulfill directives immediately and state results clearly.
+3. Only offer English phrasing suggestions if the user explicitly asks for English practice or feedback. Never attach unsolicited corrections to casual chat.
 
 CRITICAL FORMATTING INSTRUCTIONS:
 1. NEVER output triple asterisks '***' or quadruple asterisks.
@@ -201,7 +184,6 @@ Always use this as the accurate real-time date and time for all responses.
 
 def get_or_create_chat_session(user_id: int):
     global chat_sessions, _last_date
-    from datetime import datetime
     today = datetime.now(config.get_tz()).date()
     if _last_date is None or today != _last_date:
         chat_sessions.clear()
@@ -209,12 +191,14 @@ def get_or_create_chat_session(user_id: int):
 
     if user_id not in chat_sessions:
         model_name = get_current_model_name()
-        model = genai.GenerativeModel(
-            model_name=model_name,
-            tools=tools_list,
-            system_instruction=get_dynamic_system_prompt()
+        chat_sessions[user_id] = genai_client.chats.create(
+            model=model_name,
+            config=types.GenerateContentConfig(
+                system_instruction=get_dynamic_system_prompt(),
+                tools=tools_list,
+                temperature=0.7
+            )
         )
-        chat_sessions[user_id] = model.start_chat(enable_automatic_function_calling=True)
 
     return chat_sessions[user_id]
 
@@ -224,7 +208,8 @@ def query_openai(prompt: str) -> str:
     returns the ChatGPT response. If quota is exhausted or an error occurs,
     gracefully returns None to allow seamless fallback to Gemini.
     """
-    if not openai_client:
+    global _openai_quota_exhausted
+    if not openai_client or _openai_quota_exhausted:
         return None
     try:
         sys_prompt = get_dynamic_system_prompt()
@@ -235,15 +220,17 @@ def query_openai(prompt: str) -> str:
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=1200
+            max_tokens=1200,
+            timeout=4.0
         )
         if completion and completion.choices and completion.choices[0].message:
             return clean_jarvis_text(completion.choices[0].message.content or "")
         return None
     except Exception as e:
         err_msg = str(e).lower()
-        if "quota" in err_msg or "429" in err_msg or "credit_balance_exhausted" in err_msg:
-            logger.info("OpenAI quota exhausted (credit balance $0). Seamlessly falling back to Gemini failover pool.")
+        if "quota" in err_msg or "429" in err_msg or "credit_balance_exhausted" in err_msg or "insufficient_quota" in err_msg:
+            _openai_quota_exhausted = True
+            logger.info("OpenAI quota exhausted ($0 balance). Auto-routing to lightning-fast Gemini pool.")
         else:
             logger.warning(f"OpenAI error: {e}. Falling back to Gemini pool.")
         return None
@@ -261,23 +248,13 @@ def query_gemini_agent(prompt: str) -> str:
             return clean_jarvis_text(response.text)
         except Exception as e:
             err_str = str(e).lower()
-            # If rate limit / quota exceeded (429) or model deprecated (404)
-            if "quota" in err_str or "429" in err_str or "not found" in err_str or "404" in err_str or "resourceexhausted" in err_str:
-                logger.warning(f"Model {get_current_model_name()} hit quota/error. Switching to next model...")
-                current_model_idx = (current_model_idx + 1) % len(MODELS_POOL)
-                chat_sessions.clear()  # Reinitialize with new model
-                attempts += 1
-                continue
-            else:
-                try:
-                    chat_sessions.pop(user_id, None)
-                    session = get_or_create_chat_session(user_id)
-                    response = session.send_message(prompt)
-                    return clean_jarvis_text(response.text)
-                except Exception as e2:
-                    return f"YoBot encountered an error: {e2}"
+            logger.warning(f"Model {get_current_model_name()} error ({e}). Rotating model...")
+            current_model_idx = (current_model_idx + 1) % len(MODELS_POOL)
+            chat_sessions.clear()  # Reinitialize with next model
+            attempts += 1
+            continue
 
-    return "YoBot is temporarily rate-limited across free tiers. Please try again in a few moments."
+    return "YoBot is temporarily unavailable. Please try again in a moment."
 
 def query_agent(prompt: str) -> str:
     """
@@ -291,12 +268,13 @@ def query_agent(prompt: str) -> str:
         "repeat", "recurring", "stop reminder", "water", "weather", "cricket",
         "calendar", "event", "birthday", "bday", "book", "reading", "page",
         "task", "habit", "lock", "clipboard", "volume", "battery",
-        "system stats", "screenshot", "currency", "emi", "email"
+        "system stats", "screenshot", "currency", "emi", "email", "sheet", "sheets",
+        "linkedin", "post"
     ]
     prompt_lower = prompt.lower()
     requires_tools = any(kw in prompt_lower for kw in action_keywords)
 
-    if not requires_tools and openai_client:
+    if not requires_tools and openai_client and not _openai_quota_exhausted:
         openai_res = query_openai(prompt)
         if openai_res:
             return openai_res
@@ -329,17 +307,13 @@ def analyze_image(image_bytes: bytes, prompt: str = "Analyze this image and desc
     while attempts < len(MODELS_POOL):
         try:
             m_name = get_current_model_name()
-            vision_model = genai.GenerativeModel(m_name)
-            img_part = {"mime_type": mime, "data": image_bytes}
-            response = vision_model.generate_content([prompt, img_part])
-            return clean_jarvis_text(response.text)
+            part = types.Part.from_bytes(data=image_bytes, mime_type=mime)
+            res = genai_client.models.generate_content(model=m_name, contents=[prompt, part])
+            return clean_jarvis_text(res.text)
         except Exception as e:
-            err_str = str(e).lower()
-            if "quota" in err_str or "429" in err_str or "resourceexhausted" in err_str:
-                current_model_idx = (current_model_idx + 1) % len(MODELS_POOL)
-                attempts += 1
-                continue
-            return f"Image analysis failed: {e}"
+            current_model_idx = (current_model_idx + 1) % len(MODELS_POOL)
+            attempts += 1
+            continue
     return "Image analysis temporarily unavailable due to API rate limits."
 
 def analyze_audio(audio_bytes: bytes, prompt: str = "Listen to this audio voice note from the user and provide an intelligent, direct executive response.") -> str:
@@ -349,17 +323,13 @@ def analyze_audio(audio_bytes: bytes, prompt: str = "Listen to this audio voice 
     while attempts < len(MODELS_POOL):
         try:
             m_name = get_current_model_name()
-            audio_model = genai.GenerativeModel(m_name)
-            audio_part = {"mime_type": mime, "data": audio_bytes}
-            response = audio_model.generate_content([prompt, audio_part])
-            return clean_jarvis_text(response.text)
+            part = types.Part.from_bytes(data=audio_bytes, mime_type=mime)
+            res = genai_client.models.generate_content(model=m_name, contents=[prompt, part])
+            return clean_jarvis_text(res.text)
         except Exception as e:
-            err_str = str(e).lower()
-            if "quota" in err_str or "429" in err_str or "resourceexhausted" in err_str:
-                current_model_idx = (current_model_idx + 1) % len(MODELS_POOL)
-                attempts += 1
-                continue
-            return f"Voice processing failed: {e}"
+            current_model_idx = (current_model_idx + 1) % len(MODELS_POOL)
+            attempts += 1
+            continue
     return "Voice processing temporarily unavailable due to API rate limits."
 
 def parse_receipt_image(image_bytes: bytes) -> dict:
@@ -373,22 +343,27 @@ def parse_receipt_image(image_bytes: bytes) -> dict:
 Respond ONLY with the JSON object.
 """
     try:
-        import json
-        res = analyze_image(image_bytes, prompt)
-        json_match = re.search(r'\{.*\}', res, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group(0))
-            logged = expenses_service.log_expense(
-                amount=float(data.get("amount", 0.0)),
-                category=data.get("category", "General"),
-                description=data.get("description", "Receipt"),
-                expense_date=data.get("date")
+        raw_res = analyze_image(image_bytes, prompt)
+        match = re.search(r'\{.*\}', raw_res, re.DOTALL)
+        if match:
+            data = json.loads(match.group(0))
+            amt = float(data.get("amount", 0.0))
+            cat = str(data.get("category", "General"))
+            desc = str(data.get("description", "Receipt Scan"))
+            dt = str(data.get("date", ""))
+            
+            exp = expenses_service.log_expense(
+                amount=amt,
+                category=cat,
+                description=desc,
+                expense_date=dt
             )
             return {
                 "success": True,
-                "data": logged,
-                "message": f"Logged expense ₹{logged['amount']} under {logged['category']} ({logged['description']})."
+                "message": f"🧾 **Receipt Processed & Logged!**\n\n• **Amount:** ₹{amt:,.2f}\n• **Category:** {cat}\n• **Vendor:** {desc}\n• **Date:** {exp.get('date')}",
+                "expense": exp
             }
-        return {"success": False, "message": f"Could not parse receipt JSON: {res}"}
+        else:
+            return {"success": False, "message": "Could not extract standard expense data from this image."}
     except Exception as e:
-        return {"success": False, "message": f"Error parsing receipt: {e}"}
+        return {"success": False, "message": f"Failed to parse receipt image: {e}"}

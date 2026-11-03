@@ -12,7 +12,7 @@ print("     YoBot COMPREHENSIVE DIAGNOSTIC TEST SUITE    ")
 print("==================================================")
 
 tests_passed = 0
-total_tests = 18
+total_tests = 19
 
 def run_test(num, name, fn):
     global tests_passed
@@ -218,6 +218,25 @@ def test_recurring_reminders():
     # Delete synthetic reminder
     reminders_service.delete_reminder(rem["id"])
 
+# 19. Google Sheets Live Database Background Sync
+def test_sheets_service():
+    import sheets_service
+    # Test status check without crash
+    status = sheets_service.get_sync_status()
+    assert isinstance(status, dict)
+    assert "linked" in status
+    
+    # Test data extraction from local SQLite
+    expenses_data = sheets_service.extract_table_data("Expenses")
+    assert isinstance(expenses_data, list)
+    
+    # Test trigger background sync doesn't raise exception
+    sheets_service.trigger_background_sync(delay_seconds=0.1)
+    
+    # Test graceful response when auth is pending
+    link_reply = sheets_service.get_sheets_link()
+    assert isinstance(link_reply, str)
+
 # 18. Smart 12-Hour Natural Language Reminder Extraction
 def test_smart_time_resolution():
     import reminders_service
@@ -247,6 +266,7 @@ if __name__ == "__main__":
     run_test(16, "Data Guardian Vault & Auto-Persistence", test_data_guardian)
     run_test(17, "Recurring Reminders Auto-Rescheduling Engine", test_recurring_reminders)
     run_test(18, "Smart 12-Hour Natural Reminder Extraction", test_smart_time_resolution)
+    run_test(19, "Google Sheets Live Database Background Sync", test_sheets_service)
 
     print("==================================================")
     print(f"RESULTS: {tests_passed}/{total_tests} Subsystems Verified Successfully!")

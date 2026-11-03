@@ -54,7 +54,7 @@ def list_tasks(completed: bool = False, user_id: int = None) -> list:
     conn.close()
     return [{"id": r[0], "title": r[1], "due_date": r[2], "completed": bool(r[3]), "created_at": r[4]} for r in rows]
 
-def complete_task(task_id, user_id: int = None) -> bool:
+def complete_task(task_id: int, user_id: int = None) -> bool:
     user_id = config.resolve_user_id(user_id)
     try:
         task_id = int(float(task_id))
@@ -73,7 +73,7 @@ def complete_task(task_id, user_id: int = None) -> bool:
         pass
     return affected
 
-def delete_task(task_id, user_id: int = None) -> bool:
+def delete_task(task_id: int, user_id: int = None) -> bool:
     user_id = config.resolve_user_id(user_id)
     try:
         task_id = int(float(task_id))

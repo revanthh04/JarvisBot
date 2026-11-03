@@ -20,6 +20,7 @@ An asynchronous, cloud-native Telegram AI personal assistant built in Python. Po
 - **💰 Expense & Financial Ledger:** Tracks spendings, calculates monthly totals, groups by category, and normalizes natural-language dates.
 - **📚 Book Reading Tracker:** Logs current reading progress, pages read, completion status, and personal reading notes.
 - **🛡️ Data Guardian Master Vault:** Automatic atomic JSON snapshotting of all SQLite databases ensuring 100% data durability across ephemeral cloud container restarts.
+- **📊 Google Sheets Live Cloud Sync:** Instant SQLite transactions coupled with non-blocking background synchronization to a live Google Spreadsheet dashboard accessible directly from your phone.
 - **🎙️ Voice & Multimodal:** Supports voice message transcription, receipt image recognition, and Edge-TTS voice replies.
 - **🔒 Multi-Tenant Privacy Isolation:** Thread-safe user session isolation via Python `contextvars`, allowing seamless sharing with friends while keeping personal records private.
 - **⚡ 24/7 Cloud Resilience:** Built-in HTTP server and background self-pinger to prevent Render free-tier containers from spinning down into sleep mode.
@@ -48,6 +49,7 @@ Simply open [@Revu04_bot](https://t.me/Revu04_bot) on Telegram and start chattin
 | **Stop Reminders** | *"/remind stop water"* or *"stop water reminder"* |
 | **Log Expense** | *"Spent 150 on filter coffee and snacks today"* |
 | **Expense Summary** | *"How much did I spend this month?"* |
+| **Google Sheets Dashboard** | *"/sheets"* or *"Give me the link to my Google Sheet"* |
 | **Reading Progress** | *"I read up to page 88 in The Pragmatic Programmer"* |
 | **Habits & Tasks** | *"Add habit Morning Meditation"* or *"Add task Call accountant"* |
 | **Live Info** | *"What is the weather in Hyderabad today?"* |

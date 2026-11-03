@@ -1,3 +1,7 @@
 Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "venv\Scripts\pythonw.exe bot.py", 0, False
+Set FSO = CreateObject("Scripting.FileSystemObject")
+ScriptDir = FSO.GetParentFolderName(WScript.ScriptFullName)
+WshShell.CurrentDirectory = ScriptDir
+WshShell.Run Chr(34) & ScriptDir & "\venv\Scripts\pythonw.exe" & Chr(34) & " " & Chr(34) & ScriptDir & "\bot.py" & Chr(34), 0, False
 Set WshShell = Nothing
+Set FSO = Nothing
