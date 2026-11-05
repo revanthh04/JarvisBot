@@ -56,7 +56,7 @@ def _clean_reminder_message(raw_msg: str) -> str:
 
     # Strip explicit time markers like 'at 7:45', 'at 7:45 pm', 'in 15 mins'
     msg = re.sub(r'\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?', '', msg, flags=re.IGNORECASE).strip()
-    msg = re.sub(r'\bin\s+\d+\s*(?:minutes?|mins?|m|hours?|hrs?|h)', '', msg, flags=re.IGNORECASE).strip()
+    msg = re.sub(r'\b(?:with\s+in|within|after|in)\s+\d+\s*(?:minutes?|mins?|m|hours?|hrs?|h)', '', msg, flags=re.IGNORECASE).strip()
 
     # Strip conversational fillers
     msg = re.sub(r'\b(?:okayy?|ok|please|thanks?)\b', '', msg, flags=re.IGNORECASE).strip()
@@ -131,8 +131,8 @@ def create_reminder(
     # If time_str was not passed, extract from message
     if not time_str and not delay_minutes:
         match_at = re.search(r'\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)', norm_msg, flags=re.IGNORECASE)
-        match_in_m = re.search(r'\bin\s+(\d+)\s*(?:minutes?|mins?|m)', norm_msg, flags=re.IGNORECASE)
-        match_in_h = re.search(r'\bin\s+(\d+)\s*(?:hours?|hrs?|h)', norm_msg, flags=re.IGNORECASE)
+        match_in_m = re.search(r'\b(?:with\s+in|within|after|in)\s+(\d+)\s*(?:minutes?|mins?|m)', norm_msg, flags=re.IGNORECASE)
+        match_in_h = re.search(r'\b(?:with\s+in|within|after|in)\s+(\d+)\s*(?:hours?|hrs?|h)', norm_msg, flags=re.IGNORECASE)
         if match_at:
             time_str = match_at.group(1)
         elif match_in_h:

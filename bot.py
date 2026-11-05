@@ -3,6 +3,7 @@ import io
 import re
 import logging
 import asyncio
+import json
 from datetime import time
 import tempfile
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -36,6 +37,7 @@ import reminders_service
 import books_service
 import backup_service
 import sheets_service
+import sheets_store
 import linkedin_service
 
 # Logging setup
@@ -56,12 +58,12 @@ def markdown_to_telegram_html(text: str) -> str:
     code_blocks = []
     def save_code_block(match):
         code_blocks.append(escape_tg(match.group(1)))
-        return f"___CODEBLOCK{len(code_blocks)-1}___"
+        return f"ZZCODEBLOCK{len(code_blocks)-1}ZZ"
 
     inline_codes = []
     def save_inline_code(match):
         inline_codes.append(escape_tg(match.group(1)))
-        return f"___INLINECODE{len(inline_codes)-1}___"
+        return f"ZZINLINECODE{len(inline_codes)-1}ZZ"
 
     # Save code blocks
     text = re.sub(r'```(?:[a-zA-Z0-9_-]+)?\n?(.*?)```', save_code_block, text, flags=re.DOTALL)
@@ -91,13 +93,16 @@ def markdown_to_telegram_html(text: str) -> str:
 
     # Restore code blocks and inline codes
     for i, cb in enumerate(code_blocks):
-        text = text.replace(f"___CODEBLOCK{i}___", f"<pre><code>{cb}</code></pre>")
+        text = text.replace(f"ZZCODEBLOCK{i}ZZ", f"<pre><code>{cb}</code></pre>")
     for i, ic in enumerate(inline_codes):
-        text = text.replace(f"___INLINECODE{i}___", f"<code>{ic}</code>")
+        text = text.replace(f"ZZINLINECODE{i}ZZ", f"<code>{ic}</code>")
 
     return text.strip()
 
 async def send_rich_reply(update: Update, text: str):
+    warning = sheets_store.warning_text()
+    if warning and warning not in text:
+        text = f"{text}\n\n{warning}"
     html_text = markdown_to_telegram_html(text)
     try:
         await update.message.reply_text(html_text, parse_mode=ParseMode.HTML)
@@ -109,13 +114,18 @@ async def send_rich_reply(update: Update, text: str):
 # Lightweight HTTP Health Check Server (for 24/7 Render keep-alive)
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200)
+        storage = sheets_store.health_status()
+        ready = not storage.get("enabled") or storage.get("ready", False)
+        self.send_response(200 if ready else 503)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
-        self.wfile.write(b'{"status": "ok", "service": "YoBot AI Assistant"}')
+        self.wfile.write(json.dumps({"status": "ok" if ready else "unavailable",
+                                    "service": "YoBot AI Assistant", "storage": storage}).encode("utf-8"))
 
     def do_HEAD(self):
-        self.send_response(200)
+        storage = sheets_store.health_status()
+        ready = not storage.get("enabled") or storage.get("ready", False)
+        self.send_response(200 if ready else 503)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
 
@@ -295,7 +305,7 @@ async def cmd_clipboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         task_text = " ".join(context.args)
-        tasks_service.add_task(task_text)
+        await asyncio.to_thread(tasks_service.add_task, task_text)
         await send_rich_reply(update, f"✅ Added task: **{task_text}**")
     else:
         active = tasks_service.list_tasks(completed=False)
@@ -468,26 +478,27 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sub = args[0].lower()
     if sub in ["stop", "cancel"]:
         keyword = " ".join(args[1:]) if len(args) > 1 else ""
-        res = reminders_service.stop_recurring_reminders(keyword=keyword)
+        res = await asyncio.to_thread(reminders_service.stop_recurring_reminders, keyword=keyword)
         await send_rich_reply(update, f"⏰ {res['status_message']}")
     elif sub in ["delete", "del", "remove"] and len(args) >= 2 and args[1].isdigit():
         rem_id = int(args[1])
-        res = reminders_service.delete_reminder(reminder_id=rem_id)
+        res = await asyncio.to_thread(reminders_service.delete_reminder, reminder_id=rem_id)
         await send_rich_reply(update, f"⏰ {res['status_message']}")
     elif sub == "every" and len(args) >= 3 and args[1].isdigit():
         mins = int(args[1])
         msg = " ".join(args[2:])
-        res = reminders_service.create_reminder(message=msg, repeat_interval_minutes=mins, is_recurring=True)
+        res = await asyncio.to_thread(reminders_service.create_reminder, message=msg,
+                                     repeat_interval_minutes=mins, is_recurring=True)
         await send_rich_reply(update, f"⏰ {res['status']}")
     elif len(args) >= 2 and args[0].isdigit():
         mins = int(args[0])
         msg = " ".join(args[1:])
-        res = reminders_service.create_reminder(message=msg, delay_minutes=mins)
+        res = await asyncio.to_thread(reminders_service.create_reminder, message=msg, delay_minutes=mins)
         await send_rich_reply(update, f"⏰ {res['status']}")
     else:
         # Pass the full text to create_reminder natural language parser
         raw_text = " ".join(args)
-        res = reminders_service.create_reminder(message=raw_text)
+        res = await asyncio.to_thread(reminders_service.create_reminder, message=raw_text)
         await send_rich_reply(update, f"⏰ {res['status']}")
 
 @restricted
@@ -514,7 +525,7 @@ async def cmd_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = rest.split(" by ")
         title = parts[0].strip()
         author = parts[1].strip() if len(parts) > 1 else ""
-        res = books_service.add_book(title=title, author=author)
+        res = await asyncio.to_thread(books_service.add_book, title=title, author=author)
         await send_rich_reply(update, f"📚 {res.get('status_message', 'Book added.')}")
     elif sub in ["progress", "page", "update"]:
         if len(args) < 3:
@@ -524,7 +535,8 @@ async def cmd_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
         title_str = " ".join(args[1:-1])
         try:
             page_num = int(page_str)
-            res = books_service.update_book_progress(title=title_str, current_page=page_num)
+            res = await asyncio.to_thread(books_service.update_book_progress,
+                                         title=title_str, current_page=page_num)
             await send_rich_reply(update, f"📚 {res.get('status_message', res.get('error', 'Progress updated.'))}")
         except ValueError:
             await send_rich_reply(update, "Invalid page number. Usage: `/books progress <Title> <page_number>`")
@@ -551,12 +563,21 @@ async def cmd_books(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @restricted
 @admin_only
 async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    result = backup_service.backup_all_databases()
+    result = await asyncio.to_thread(backup_service.backup_all_databases)
     if result.get("status") != "success":
-        await send_rich_reply(update, "⚠️ Backup failed. The previous vault was preserved; check the server logs.")
+        await send_rich_reply(update, "⚠️ The backup did not complete. Check `/sheets` for cloud storage status.")
         return
-    status = backup_service.get_vault_status()
+    status = await asyncio.to_thread(backup_service.get_vault_status)
     act = status.get("active_sqlite_records", {})
+    storage = sheets_store.health_status()
+    if storage.get("enabled"):
+        storage_note = (
+            "Your records are saved in Google Sheets for recovery after a restart."
+            if storage.get("ready") and not storage.get("pending")
+            else "Google Sheets has not confirmed the latest save. The local snapshot alone cannot survive every cloud restart."
+        )
+    else:
+        storage_note = "This local snapshot requires persistent disk storage or an off-server backup for cloud recovery."
     text = (
         "🛡️ **Data Guardian Vault Status**\n\n"
         "A local snapshot was written successfully:\n"
@@ -564,17 +585,17 @@ async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"• **Books Library:** {act.get('books', 0)} books\n"
         f"• **Notes:** {act.get('notes', 0)} notes\n"
         f"• **Tasks:** {act.get('tasks', 0)} tasks\n"
-        f"• **Reminders:** {act.get('reminders', 0)} active\n"
+        f"• **Reminders:** {act.get('reminders', 0)} records\n"
         f"• **Total Vault Records:** {status.get('vault_records', 0)}\n"
         f"• **Last Snapshot:** `{status.get('last_backup', 'Just now')[:19]}`\n\n"
-        "Cloud recovery requires persistent storage for the databases and vault."
+        f"{storage_note}"
     )
     await send_rich_reply(update, text)
 
 @restricted
 @admin_only
 async def cmd_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    status = sheets_service.get_sync_status()
+    status = await asyncio.to_thread(sheets_service.get_sync_status)
     url = status.get("url")
     if not status.get("linked"):
         if status.get("status_code") == "insufficient_scope":
@@ -595,6 +616,17 @@ async def cmd_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     counts = status.get("counts", {})
+    durable = status.get("durable", {})
+    if durable.get("enabled"):
+        if durable.get("pending"):
+            storage_line = "⚠️ **Cloud storage:** A save is pending; the latest changes are not yet confirmed in Sheets."
+        elif durable.get("ready"):
+            storage_line = "✅ **Cloud storage:** Connected. Saved records are recovered from Sheets on restart."
+        else:
+            storage_line = "⚠️ **Cloud storage:** Recovery is not ready."
+        storage_line += "\n\n"
+    else:
+        storage_line = "**Cloud storage:** Export only; startup recovery is not enabled.\n\n"
     last_sync = status.get("last_sync", "Never")
     if last_sync and len(last_sync) > 19:
         last_sync = last_sync[:19].replace("T", " ")
@@ -602,11 +634,14 @@ async def cmd_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "📊 **Google Sheets Live Second Brain**\n\n"
         f"🔗 **Spreadsheet Link:** [Open in Google Sheets]({url})\n\n"
-        f"• **Expenses:** {counts.get('Expenses', 0)} synced\n"
-        f"• **Tasks:** {counts.get('Tasks', 0)} synced\n"
-        f"• **Habits:** {counts.get('Habits', 0)} synced\n"
-        f"• **Books:** {counts.get('Books', 0)} synced\n"
-        f"• **Notes:** {counts.get('Notes', 0)} synced\n"
+        f"{storage_line}"
+        f"• **Expenses:** {counts.get('Expenses', counts.get('expenses', 0))} synced\n"
+        f"• **Tasks:** {counts.get('Tasks', counts.get('tasks', 0))} synced\n"
+        f"• **Habits:** {counts.get('Habits', counts.get('habits', 0))} synced\n"
+        f"• **Books:** {counts.get('Books', counts.get('books', 0))} synced\n"
+        f"• **Notes:** {counts.get('Notes', counts.get('notes', 0))} synced\n"
+        f"• **Habit history:** {counts.get('habit_logs', counts.get('Habit History', 0))} synced\n"
+        f"• **Reminders:** {counts.get('Reminders', counts.get('reminders', 0))} synced\n"
         f"• **Last Sync:** `{last_sync}`\n\n"
         "💡 *Tip: Use `/syncsheets` to force an immediate refresh.*"
     )
@@ -615,19 +650,21 @@ async def cmd_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @restricted
 @admin_only
 async def cmd_syncsheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_rich_reply(update, "⏳ Synchronizing all SQLite databases to Google Sheets...")
-    res = sheets_service.sync_all_to_sheets()
+    await send_rich_reply(update, "⏳ Saving your records to Google Sheets...")
+    res = await asyncio.to_thread(sheets_service.sync_all_to_sheets)
     if res.get("status") == "success":
         counts = res.get("counts", {})
         url = res.get("url")
         text = (
             "✅ **Google Sheets Sync Complete!**\n\n"
             f"🔗 **Spreadsheet Link:** [Open in Google Sheets]({url})\n\n"
-            f"• **Expenses:** {counts.get('Expenses', 0)}\n"
-            f"• **Tasks:** {counts.get('Tasks', 0)}\n"
-            f"• **Habits:** {counts.get('Habits', 0)}\n"
-            f"• **Books:** {counts.get('Books', 0)}\n"
-            f"• **Notes:** {counts.get('Notes', 0)}"
+            f"• **Expenses:** {counts.get('Expenses', counts.get('expenses', 0))}\n"
+            f"• **Tasks:** {counts.get('Tasks', counts.get('tasks', 0))}\n"
+            f"• **Habits:** {counts.get('Habits', counts.get('habits', 0))}\n"
+            f"• **Books:** {counts.get('Books', counts.get('books', 0))}\n"
+            f"• **Notes:** {counts.get('Notes', counts.get('notes', 0))}\n"
+            f"• **Habit history:** {counts.get('habit_logs', counts.get('Habit History', 0))}\n"
+            f"• **Reminders:** {counts.get('Reminders', counts.get('reminders', 0))}"
         )
     else:
         text = f"⚠️ **Sync notice:** {res.get('message', 'Failed to sync')}"
@@ -698,9 +735,9 @@ async def check_reminders_job(context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(chat_id=user_id, text=msg, parse_mode=ParseMode.HTML)
             if is_rec and interval > 0:
-                reminders_service.reschedule_recurring_reminder(rem_id, interval)
+                await asyncio.to_thread(reminders_service.reschedule_recurring_reminder, rem_id, interval)
             else:
-                reminders_service.mark_reminder_triggered(rem_id)
+                await asyncio.to_thread(reminders_service.mark_reminder_triggered, rem_id)
         except Exception as e:
             logger.error(f"Failed to send reminder {rem_id} to user {user_id}: {e}")
 
@@ -796,6 +833,12 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         transcript = await asyncio.to_thread(ai_agent.transcribe_audio, audio_data)
         reply_text = await asyncio.to_thread(ai_agent.query_agent, transcript)
+        warning = sheets_store.warning_text()
+        if warning:
+            if warning not in reply_text:
+                reply_text = f"{reply_text}\n\n{warning}"
+            # Captions are truncated below; always make a pending save visible in text too.
+            await update.message.reply_text(warning)
         
         reply_audio = await voice_service.text_to_speech(reply_text)
         try:
@@ -833,17 +876,28 @@ def main():
         print("ERROR: TELEGRAM_BOT_TOKEN not configured in .env file.")
         return
 
-    # Data Guardian: Auto-restore databases from vault backup if container was restarted
-    try:
-        restore_res = backup_service.restore_all_databases()
-        logger.info(f"Data Guardian auto-restore completed: {restore_res}")
-    except Exception as e:
-        logger.warning(f"Data Guardian restore warning: {e}")
+    if sheets_store.enabled():
+        try:
+            restore_res = sheets_store.restore_on_startup()
+        except Exception:
+            raise RuntimeError("Google Sheets recovery failed; bot polling was not started.") from None
+        logger.info("Google Sheets startup recovery completed.")
+    else:
+        # Legacy local-vault mode remains available when remote recovery is disabled.
+        try:
+            restore_res = backup_service.restore_all_databases()
+            logger.info(f"Data Guardian auto-restore completed: {restore_res}")
+        except Exception as e:
+            logger.warning(f"Data Guardian restore warning: {e}")
 
     # Free-host redeploys can reload a snapshot with already delivered alerts.
     # Never send that historical backlog as if the user just requested it.
     cleanup = reminders_service.reconcile_overdue_at_startup()
     logger.info("Startup reminder reconciliation: %s", cleanup)
+    if sheets_store.enabled():
+        storage = sheets_store.health_status()
+        if not storage.get("ready") or storage.get("pending"):
+            raise RuntimeError("Google Sheets startup save is incomplete; bot polling was not started.")
 
     port = int(os.environ.get("PORT", 8080))
     start_health_server(port)

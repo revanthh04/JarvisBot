@@ -131,3 +131,11 @@ Access is closed by default (`OPEN_ACCESS=false`). The admin and IDs in `ALLOWED
 The checked-in Render blueprint still uses the free plan. Render documents that local files are lost on restarts, redeploys, and spin-downs, and that persistent disks require a paid service: [free service limitations](https://render.com/docs/free#local-files-lost-on-redeploy), [persistent disk setup](https://render.com/docs/disks). After provisioning a persistent mount such as `/var/data`, set `JARVIS_DATA_DIR` to that mount and migrate the existing data before starting the bot. A local vault alone is not an off-server backup.
 
 See [BUGFIX_REPORT.md](BUGFIX_REPORT.md) for verified fixes and remaining work.
+
+## Pending durable Sheets migration
+
+The bot runs on the free Render web service configured by render.yaml; GitHub stores its source. SHEETS_DURABLE_STORAGE remains false until OAuth access is renewed and the explicit migration succeeds. Existing export behavior remains active in this release.
+
+The new opt-in storage code includes all seven admin tables, startup recovery, atomic snapshots, deletion recovery, stale-writer checks, and pending-save warnings. Guest records are excluded from the admin workbook. Use manage_sheets_store.py --bootstrap once only after validating Google access, then --verify-recovery. Do not enable the flag before successful migration. Recovery tabs and dashboard views are managed by the bot; edit records through Telegram. Free Render availability limits still apply.
+
+The reminder parser now accepts after, within and with in as relative delays, and Telegram code formatting no longer exposes internal placeholders. Tests cover the reported examples. Live Google refresh currently reports invalid_grant and needs reauthorization before migration can be completed.

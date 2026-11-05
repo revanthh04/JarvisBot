@@ -93,7 +93,8 @@ def get_credentials():
         creds = Credentials.from_authorized_user_file(TOKEN_FILE)
         if creds and creds.expired and creds.refresh_token:
             try:
-                creds.refresh(Request())
+                request = Request()
+                creds.refresh(lambda *a, **kw: request(*a, **dict(kw, timeout=20)))
                 with open(TOKEN_FILE, "w", encoding="utf-8") as token_out:
                     token_out.write(creds.to_json())
             except Exception as ref_err:
@@ -118,7 +119,9 @@ def get_sheets_service():
         return None, "insufficient_scope"
     try:
         from googleapiclient.discovery import build
-        service = build("sheets", "v4", credentials=creds, cache_discovery=False)
+        import httplib2
+        from google_auth_httplib2 import AuthorizedHttp
+        service = build("sheets", "v4", http=AuthorizedHttp(creds, http=httplib2.Http(timeout=20)), cache_discovery=False)
         return service, "ok"
     except Exception as e:
         logger.error(f"Failed to build Sheets service: {e}")
@@ -272,6 +275,9 @@ def sync_all_to_sheets() -> Dict[str, Any]:
     """
     Executes a complete synchronization of all SQLite tables to Google Sheets in batch.
     """
+    if config.SHEETS_DURABLE_STORAGE:
+        import sheets_store
+        return sheets_store.sync_now()
     global _is_syncing
     with _sync_lock:
         if _is_syncing:
@@ -360,6 +366,8 @@ def trigger_background_sync(delay_seconds: float = 3.0):
     If called again within delay_seconds, resets the timer so rapid operations
     (e.g. logging 3 expenses in 5s) only trigger 1 Google API call.
     """
+    if config.SHEETS_DURABLE_STORAGE:
+        return  # Durable writes happen synchronously; periodic job retries failures.
     global _sync_timer
     with _sync_lock:
         if _sync_timer is not None:
@@ -377,13 +385,15 @@ def get_sync_status() -> dict:
     sid = get_spreadsheet_id()
     cfg = load_sheet_config()
     
+    import sheets_store
     return {
         "linked": creds is not None and status == "ok",
         "status_code": status,
         "spreadsheet_id": sid,
         "url": f"https://docs.google.com/spreadsheets/d/{sid}/edit" if sid else None,
         "last_sync": cfg.get("last_sync"),
-        "counts": cfg.get("counts", {})
+        "counts": cfg.get("counts", {}),
+        "durable": sheets_store.health_status(),
     }
 
 @config.require_admin

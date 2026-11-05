@@ -7,3 +7,4 @@ credentials.json
 *.mp3
 *.ogg
 *.png
+storage-migration-*.json

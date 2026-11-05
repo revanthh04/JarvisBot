@@ -30,6 +30,7 @@ ENV = patch.dict(os.environ, {
     "GOOGLE_TOKEN_JSON": "", "GOOGLE_SPREADSHEET_ID": "", "OPENAI_API_KEY": "",
     "GEMINI_API_KEY": "offline-test-key", "TELEGRAM_BOT_TOKEN": "123:test",
     "ALLOWED_USER_IDS": "", "OPEN_ACCESS": "false", "USER_TIMEZONE": "Asia/Kolkata",
+    "SHEETS_DURABLE_STORAGE": "false",
 })
 ENV.start()
 atexit.register(ENV.stop)
@@ -146,6 +147,15 @@ class AccessTests(IsolatedTest):
 
 
 class ReminderTests(IsolatedTest):
+    def test_relative_wording_preserves_message_and_delay(self):
+        now = self.freeze_reminders()
+        for phrase, minutes in (("after 2 mins", 2), ("with in 5 mins", 5), ("within 5 mins", 5), ("in 2 mins", 2)):
+            with self.subTest(phrase=phrase):
+                result = SERVICES["reminders"].create_reminder("remind me to drink water " + phrase)
+                self.assertEqual(result["message"], "Drink water")
+                row = next(r for r in SERVICES["reminders"].list_active_reminders() if r["id"] == result["id"])
+                self.assertEqual((datetime.fromisoformat(row["raw_remind_at"]) - now).total_seconds(), minutes * 60)
+
     def test_startup_does_not_replay_snapshot_reminders(self):
         now = self.freeze_reminders()
         service = SERVICES["reminders"]
@@ -256,6 +266,13 @@ class BackupTests(IsolatedTest):
 
 
 class RoutingAndJobsTests(IsolatedTest):
+    def test_code_formatting_does_not_leak_internal_placeholders(self):
+        result = bot.markdown_to_telegram_html("Notice: `jarvis-bot` exceeded memory.\n```\na < b\n```")
+        self.assertIn("<code>jarvis-bot</code>", result)
+        self.assertIn("a &lt; b", result)
+        self.assertNotIn("INLINECODE", result)
+        self.assertNotIn("CODEBLOCK", result)
+
     def test_direct_reminder_saved_without_model(self):
         self.freeze_reminders()
         with patch.object(ai_agent, "query_gemini_agent") as model:

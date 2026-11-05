@@ -21,6 +21,7 @@ LINKEDIN_PERSON_URN = os.getenv("LINKEDIN_PERSON_URN", "").strip()
 
 ADMIN_USER_ID = 5484600217
 OPEN_ACCESS = os.getenv("OPEN_ACCESS", "false").lower() in ("true", "1", "yes")
+SHEETS_DURABLE_STORAGE = os.getenv("SHEETS_DURABLE_STORAGE", "false").lower() in ("true", "1", "yes")
 
 DATA_DIR = os.path.abspath(os.getenv("JARVIS_DATA_DIR", os.path.dirname(__file__)))
 os.makedirs(DATA_DIR, exist_ok=True)

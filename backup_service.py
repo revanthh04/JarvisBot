@@ -62,25 +62,30 @@ def _serialized(func):
     return wrapped
 
 @_serialized
+def read_snapshot() -> dict:
+    """Read every database without changing it or triggering a cloud write."""
+    vault = {"timestamp": datetime.now().isoformat(), "tables": {}}
+    for db_path in dict.fromkeys(info["file"] for info in DATABASES.values()):
+        if not os.path.exists(db_path):
+            raise FileNotFoundError(f"Missing database: {os.path.basename(db_path)}")
+        with closing(sqlite3.connect(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            conn.execute("BEGIN")
+            for key, info in DATABASES.items():
+                if info["file"] == db_path:
+                    rows = conn.execute(f"SELECT * FROM {info['table']} ORDER BY id").fetchall()
+                    vault["tables"][key] = [dict(row) for row in rows]
+    return vault
+
+@_serialized
 def backup_all_databases() -> dict:
     """Atomically snapshot every table; preserve the last vault if a read fails.
 
     The vault must be on persistent storage to survive container replacement.
     """
-    vault = {"timestamp": datetime.now().isoformat(), "tables": {}}
     temp_path = None
     try:
-        # Read tables sharing a database in one transaction (habits + their logs).
-        for db_path in dict.fromkeys(info["file"] for info in DATABASES.values()):
-            if not os.path.exists(db_path):
-                raise FileNotFoundError(f"Missing database: {os.path.basename(db_path)}")
-            with closing(sqlite3.connect(db_path)) as conn:
-                conn.row_factory = sqlite3.Row
-                conn.execute("BEGIN")
-                for key, info in DATABASES.items():
-                    if info["file"] == db_path:
-                        rows = conn.execute(f"SELECT * FROM {info['table']}").fetchall()
-                        vault["tables"][key] = [dict(row) for row in rows]
+        vault = read_snapshot()
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=BASE_DIR,
                                          prefix="vault-", suffix=".tmp", delete=False) as f:
             temp_path = f.name
@@ -89,17 +94,26 @@ def backup_all_databases() -> dict:
             os.fsync(f.fileno())
         os.replace(temp_path, VAULT_FILE)
     except Exception as exc:
+        if config.SHEETS_DURABLE_STORAGE:
+            import sheets_store
+            sheets_store.mark_pending()
         logger.error("Backup failed; previous vault preserved: %s", exc)
         return {"status": "error", "error": str(exc)}
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
 
-    try:
-        import sheets_service
-        sheets_service.trigger_background_sync()
-    except Exception as exc:
-        logger.debug("Sheets sync trigger: %s", exc)
+    if config.SHEETS_DURABLE_STORAGE:
+        import sheets_store
+        result = sheets_store.persist(vault)
+        if result["status"] != "success":
+            return result
+    else:
+        try:
+            import sheets_service
+            sheets_service.trigger_background_sync()
+        except Exception as exc:
+            logger.debug("Sheets sync trigger: %s", exc)
     return {
         "status": "success",
         "total_records": sum(len(rows) for rows in vault["tables"].values()),
