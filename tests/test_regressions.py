@@ -412,6 +412,29 @@ class SheetsTests(IsolatedTest):
 
 
 class GoogleTests(IsolatedTest):
+    def test_inline_email_tone_resolves_contact_and_send_approves_preview(self):
+        SERVICES["notes"].add_note("Aishwarya email: test@example.invalid", "Aishwarya")
+        with patch.object(bot.gmail_service, "_deliver_email", return_value="Sent") as deliver:
+            result = ai_agent.query_agent("send an email to aishwarya that i miss her and in formal")
+            self.assertIn("Email preview — formal", result)
+            self.assertIn("test@example.invalid", result)
+            self.assertIn("I miss you", result)
+            self.assertEqual(ai_agent.query_agent("send"), "Sent")
+            deliver.assert_called_once()
+
+    def test_unresolved_recipient_does_not_create_draft(self):
+        result = bot.gmail_service.send_email("unknown", "Subject", "Body")
+        self.assertIn("provide their email address", result)
+        self.assertNotIn(config.ADMIN_USER_ID, bot.gmail_service._drafts)
+
+    def test_revoked_google_access_is_explained_without_raw_error(self):
+        service = Mock()
+        service.users.return_value.messages.return_value.send.return_value.execute.side_effect = RuntimeError("invalid_grant: Token has been expired or revoked.")
+        with patch.object(bot.gmail_service.os.path, "exists", return_value=True), patch("google.oauth2.credentials.Credentials.from_authorized_user_file"), patch("googleapiclient.discovery.build", return_value=service):
+            result = bot.gmail_service._deliver_email("test@example.invalid", "Subject", "Body")
+        self.assertIn("Google sign-in needs reconnecting", result)
+        self.assertNotIn("invalid_grant", result)
+
     def test_email_requires_tone_preview_and_explicit_confirmation(self):
         gmail = bot.gmail_service
         rewrite = Mock(return_value={"subject": "Thinking of you", "body": "Hi,\n\nI miss you."})

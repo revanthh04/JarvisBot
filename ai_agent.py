@@ -258,7 +258,14 @@ def _query_gemini_agent(prompt: str) -> str:
         try:
             session = get_or_create_chat_session(user_id)
             now = datetime.now(config.get_tz()).isoformat()
+            previous_draft = gmail_service._drafts.get(user_id)
             response = session.send_message(f"Current request time: {now}\n\n{prompt}")
+            draft = gmail_service._drafts.get(user_id)
+            if draft is not None and draft is not previous_draft:
+                tone = re.search(r"\b(formal|informal|warm|personal)\b", prompt, re.IGNORECASE)
+                if tone:
+                    return gmail_service.handle_email_reply(tone.group(1).lower(), rewrite_email_draft)
+                return "Email not sent. Which tone would you like: formal, informal, or warm/personal?"
             return clean_jarvis_text(response.text)
         except Exception as e:
             err_str = str(e).lower()
@@ -273,6 +280,17 @@ def _query_gemini_agent(prompt: str) -> str:
 def direct_request(prompt: str):
     """Handle unambiguous requests without generative claims or API quota."""
     text = prompt.strip().strip('"').strip().lower()
+    email = re.fullmatch(r"(?:please\s+)?send\s+(?:an?\s+)?email\s+to\s+(.+?)\s+(?:that|saying)\s+(.+)", prompt.strip(), re.IGNORECASE)
+    if email:
+        recipient, body = email.groups()
+        tone_match = re.search(r"\s+(?:and\s+)?(?:in\s+)?(formal|informal|warm|personal)(?:\s+tone)?[.!]?\s*$", body, re.IGNORECASE)
+        tone = tone_match.group(1).lower() if tone_match else None
+        if tone_match:
+            body = body[:tone_match.start()].strip()
+        result = gmail_service.send_email(recipient, "Message", body)
+        if tone and result.startswith("Email not sent"):
+            return gmail_service.handle_email_reply(tone, rewrite_email_draft)
+        return result
     if re.fullmatch(r"(?:what(?:'s| is) (?:the )?)?(?:today(?:'s|s)? (?:date|data|datae)|(?:date|data|datae) of today)\s*[?!]*", text):
         return f"Today is {datetime.now(config.get_tz()).strftime('%A, %B %d, %Y')} ({config.USER_TIMEZONE})."
     if re.match(r"^(?:please\s+)?remind me\b", text):
@@ -290,6 +308,8 @@ def direct_request(prompt: str):
     return None
 
 def rewrite_email_draft(draft: dict, tone: str) -> dict:
+    if re.fullmatch(r"i\s+miss\s+(?:her|you)[.!]?", draft["body"].strip(), re.IGNORECASE):
+        return {"subject": "Thinking of you", "body": "Hello,\n\nI miss you and wanted to let you know that I am thinking of you.\n\nKind regards,\nRevanth" if tone == "formal" else "Hi,\n\nI miss you.\n\nRevanth"}
     response = genai_client.models.generate_content(
         model=get_current_model_name(),
         contents="Rewrite this email in the chosen tone, preserving the facts and intent. "

@@ -5,6 +5,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from html import escape
 import threading
+import re
 from html import unescape
 
 def _message_body(payload: dict) -> str:
@@ -97,12 +98,31 @@ def read_email(msg_id: str) -> str:
 _drafts = {}
 _draft_lock = threading.RLock()
 
+def resolve_recipient(value: str):
+    value = value.strip()
+    if re.fullmatch(r"[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+", value):
+        return value
+    import notes_service
+    matches = set()
+    for row in notes_service.search_notes(value):
+        matches.update(re.findall(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", row.get("content", "")))
+    return next(iter(matches)) if len(matches) == 1 else None
+
+def preview(draft):
+    return (f"**Email preview — {draft.get('tone', 'selected tone')}**\n\n"
+            f"**To:** {draft['to']}\n**Subject:** {draft['subject']}\n\n{draft['body']}\n\n"
+            "Reply **send** or **send email** to send, choose another tone, or **cancel**.")
+
 @config.require_admin
 def send_email(to: str, subject: str, body: str) -> str:
     """Prepare an email draft. The user must choose tone and approve in Telegram before delivery."""
+    resolved = resolve_recipient(to)
+    if not resolved:
+        return "I couldn't find one clear saved email address for that recipient. Please provide their email address. Nothing was sent."
     with _draft_lock:
         _drafts[config.get_current_user_id()] = {
-            "to": to, "subject": subject, "body": body, "stage": "tone",
+            "to": resolved, "subject": subject, "body": body, "stage": "tone",
+            "original_subject": subject, "original_body": body,
         }
     return "Email not sent. Which tone would you like: formal, informal, or warm/personal? Reply with your choice, or cancel."
 
@@ -121,21 +141,24 @@ def handle_email_reply(text: str, rewrite):
             return "Email draft cancelled. Nothing was sent."
         if choice in ("formal", "informal", "warm", "personal", "warm/personal", "friendly"):
             try:
-                revised = rewrite(draft.copy(), choice)
+                source = dict(draft, subject=draft["original_subject"], body=draft["original_body"])
+                revised = rewrite(source, choice)
                 if not isinstance(revised, dict) or not all(isinstance(revised.get(k), str) and revised[k].strip() for k in ("subject", "body")):
                     raise ValueError("Invalid draft")
             except Exception:
                 return "I couldn't format the draft just now. Nothing was sent. Please choose the tone again to retry."
             draft.update(subject=revised["subject"], body=revised["body"], stage="confirm", tone=choice)
-            body = draft['body'].replace('\\n', '\n')
-            return (f"**Email preview — {choice}**\n\n**To:** {draft['to']}\n**Subject:** {draft['subject']}\n\n{body}\n\n"
-                    "Reply **send email** to send this draft, choose another tone, or **cancel**. To edit it, cancel and describe the new message.")
-        if choice in ("send email", "confirm send"):
+            draft['body'] = draft['body'].replace('\\n', '\n')
+            return preview(draft)
+        if choice in ("send", "send email", "confirm send"):
             if draft["stage"] != "confirm":
                 return "Please choose formal, informal, or warm/personal first. I'll show the draft before sending."
             del _drafts[uid]  # Consume approval before I/O; never auto-retry an uncertain send.
-            return _deliver_email(draft["to"], draft["subject"], draft["body"])
-        if choice in ("yes", "send", "ok", "okay"):
+            result = _deliver_email(draft["to"], draft["subject"], draft["body"])
+            if result.startswith("Google sign-in"):
+                _drafts[uid] = draft
+            return result
+        if choice in ("yes", "ok", "okay"):
             return "Choose a tone first." if draft["stage"] == "tone" else "To send the previewed draft, reply **send email**."
     return None
 
@@ -169,4 +192,6 @@ def _deliver_email(to: str, subject: str, body: str) -> str:
         sent = service.users().messages().send(userId="me", body={"raw": raw}).execute()
         return f"Email successfully sent to {to} (Message ID: {sent['id']})."
     except Exception as e:
-        return f"Failed to send email: {e}"
+        if "invalid_grant" in str(e) or "expired or revoked" in str(e):
+            return "Google sign-in needs reconnecting. Your email was not sent and the draft is retained. After reconnecting, reply send to retry."
+        return "I couldn't confirm email delivery. Please check Sent in Gmail before trying again to avoid sending twice."
