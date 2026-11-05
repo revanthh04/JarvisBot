@@ -1,4 +1,5 @@
 import config
+import google_accounts
 import os
 import base64
 from email.mime.text import MIMEText
@@ -35,17 +36,17 @@ def _message_body(payload: dict) -> str:
         return BeautifulSoup("\n\n".join(html), "html.parser").get_text("\n", strip=True)
     return ""
 
-@config.require_admin
+@google_accounts.require_connection
 def list_emails(query: str = "is:unread", max_results: int = 5) -> list:
     token_path = os.path.join(os.path.dirname(__file__), "token.json")
-    if not os.path.exists(token_path):
+    if config.is_admin(config.get_current_user_id()) and not google_accounts.connected() and not os.path.exists(token_path):
         return [{"status": "Gmail is not linked yet. (Requires setup_google.py)."}]
 
     try:
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
-        creds = Credentials.from_authorized_user_file(token_path)
+        creds = google_accounts.credentials()
         service = build("gmail", "v1", credentials=creds)
 
         results = service.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
@@ -66,19 +67,19 @@ def list_emails(query: str = "is:unread", max_results: int = 5) -> list:
             })
         return email_list
     except Exception as e:
-        return [{"error": f"Gmail list error: {e}"}]
+        return [{"error": google_accounts.error_message()}]
 
-@config.require_admin
+@google_accounts.require_connection
 def read_email(msg_id: str) -> str:
     token_path = os.path.join(os.path.dirname(__file__), "token.json")
-    if not os.path.exists(token_path):
+    if config.is_admin(config.get_current_user_id()) and not google_accounts.connected() and not os.path.exists(token_path):
         return "Gmail is not linked yet."
 
     try:
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
-        creds = Credentials.from_authorized_user_file(token_path)
+        creds = google_accounts.credentials()
         service = build("gmail", "v1", credentials=creds)
 
         m = service.users().messages().get(userId="me", id=msg_id, format="full").execute()
@@ -93,7 +94,7 @@ def read_email(msg_id: str) -> str:
             return f"From: {sender}\nSubject: {subject}\n\n{body}"
         return f"From: {sender}\nSubject: {subject}\n\nPreview (full body unavailable):\n{unescape(snippet)}"
     except Exception as e:
-        return f"Failed to read email {msg_id}: {e}"
+        return google_accounts.error_message()
 
 _drafts = {}
 _draft_lock = threading.RLock()
@@ -113,7 +114,7 @@ def preview(draft):
             f"**To:** {draft['to']}\n**Subject:** {draft['subject']}\n\n{draft['body']}\n\n"
             "Reply **send** or **send email** to send, choose another tone, or **cancel**.")
 
-@config.require_admin
+@google_accounts.require_connection
 def send_email(to: str, subject: str, body: str) -> str:
     """Prepare an email draft. The user must choose tone and approve in Telegram before delivery."""
     resolved = resolve_recipient(to)
@@ -129,7 +130,7 @@ def send_email(to: str, subject: str, body: str) -> str:
 def handle_email_reply(text: str, rewrite):
     """Consume only explicit draft replies; unrelated questions keep their normal route."""
     uid = config.get_current_user_id()
-    if not config.is_admin(uid):
+    if not config.is_authorized(uid):
         return None
     choice = text.strip().lower().rstrip('.!')
     with _draft_lock:
@@ -154,7 +155,11 @@ def handle_email_reply(text: str, rewrite):
             if draft["stage"] != "confirm":
                 return "Please choose formal, informal, or warm/personal first. I'll show the draft before sending."
             del _drafts[uid]  # Consume approval before I/O; never auto-retry an uncertain send.
-            result = _deliver_email(draft["to"], draft["subject"], draft["body"])
+            try:
+                result = _deliver_email(draft["to"], draft["subject"], draft["body"])
+            except google_accounts.NotConnected:
+                _drafts[uid] = draft
+                return "Your Google account is disconnected. The draft is retained. Use /connectgoogle, then reply send."
             if result.startswith("Google sign-in"):
                 _drafts[uid] = draft
             return result
@@ -162,17 +167,17 @@ def handle_email_reply(text: str, rewrite):
             return "Choose a tone first." if draft["stage"] == "tone" else "To send the previewed draft, reply **send email**."
     return None
 
-@config.require_admin
+@google_accounts.require_connection
 def _deliver_email(to: str, subject: str, body: str) -> str:
     token_path = os.path.join(os.path.dirname(__file__), "token.json")
-    if not os.path.exists(token_path):
+    if config.is_admin(config.get_current_user_id()) and not google_accounts.connected() and not os.path.exists(token_path):
         return "Gmail is not linked yet."
 
     try:
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
-        creds = Credentials.from_authorized_user_file(token_path)
+        creds = google_accounts.credentials()
         service = build("gmail", "v1", credentials=creds)
 
         # Tool arguments sometimes contain double-escaped line breaks. Decode only

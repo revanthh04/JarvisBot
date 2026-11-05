@@ -38,6 +38,9 @@ import books_service
 import backup_service
 import sheets_service
 import sheets_store
+import google_accounts
+import personal_sheets
+from urllib.parse import urlsplit, parse_qs
 import linkedin_service
 
 # Logging setup
@@ -114,6 +117,23 @@ async def send_rich_reply(update: Update, text: str):
 # Lightweight HTTP Health Check Server (for 24/7 Render keep-alive)
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if urlsplit(self.path).path == "/google/callback":
+            try:
+                if not google_accounts.setup_ready():
+                    raise ValueError("Personal sign-in not configured")
+                message = google_accounts.oauth_callback(parse_qs(urlsplit(self.path).query))
+                status = 200
+            except Exception:
+                message = "Google sign-in could not be completed. Return to Telegram and use /connectgoogle to try again."
+                status = 400
+            self.send_response(status)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(message.encode("utf-8"))
+            return
         storage = sheets_store.health_status()
         ready = not storage.get("enabled") or storage.get("ready", False)
         self.send_response(200 if ready else 503)
@@ -197,6 +217,32 @@ def admin_only(func):
     return wrapper
 
 # Command Handlers
+async def cmd_myid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user and update.effective_chat.type == "private":
+        await update.message.reply_text(f"Your Telegram user ID: {update.effective_user.id}. Share this ID with the bot owner to request access.")
+
+
+@restricted
+async def cmd_google(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.message.reply_text("For your privacy, manage Google connections in your private YoBot chat.")
+        return
+    command = update.message.text.split()[0].split("@")[0].lower()
+    try:
+        if command == "/connectgoogle":
+            result = await asyncio.to_thread(google_accounts.begin_connection)
+        elif command == "/confirmgoogle":
+            result = await asyncio.to_thread(google_accounts.confirm_connection, context.args[0]) if len(context.args) == 1 else "Use /confirmgoogle followed by the code shown after Google sign-in."
+        elif command == "/disconnectgoogle":
+            result = await asyncio.to_thread(google_accounts.disconnect)
+        else:
+            result = "Your personal Google account is connected." if await asyncio.to_thread(google_accounts.connected) else "No personal Google account is connected. Use /connectgoogle."
+        ai_agent.chat_sessions.pop(update.effective_user.id, None)
+    except Exception:
+        result = "Google connection settings are temporarily unavailable. Nothing was shared with another user. Please try again later."
+    await update.message.reply_text(result, disable_web_page_preview=True)
+
+
 @restricted
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -422,14 +468,18 @@ async def cmd_convert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_rich_reply(update, "Usage: `/convert 100 USD INR`")
 
 @restricted
-@admin_only
 async def cmd_agenda(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not config.is_admin(config.get_current_user_id()) and not await asyncio.to_thread(google_accounts.connected):
+        await update.message.reply_text("Connect your own Google account with /connectgoogle first.")
+        return
     events = calendar_service.get_calendar_events()
     await send_rich_reply(update, f"📅 {events}")
 
 @restricted
-@admin_only
 async def cmd_emails(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not config.is_admin(config.get_current_user_id()) and not await asyncio.to_thread(google_accounts.connected):
+        await update.message.reply_text("Connect your own Google account with /connectgoogle first.")
+        return
     emails = gmail_service.list_emails(query="is:unread", max_results=5)
     if not emails:
         await send_rich_reply(update, "📧 No unread emails found.")
@@ -593,8 +643,13 @@ async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_rich_reply(update, text)
 
 @restricted
-@admin_only
 async def cmd_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not config.is_admin(config.get_current_user_id()):
+        if not await asyncio.to_thread(google_accounts.connected):
+            await update.message.reply_text("Connect your own Google account with /connectgoogle first.")
+            return
+        await send_rich_reply(update, await asyncio.to_thread(personal_sheets.get_personal_sheets_link))
+        return
     status = await asyncio.to_thread(sheets_service.get_sync_status)
     url = status.get("url")
     if not status.get("linked"):
@@ -648,8 +703,13 @@ async def cmd_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_rich_reply(update, text)
 
 @restricted
-@admin_only
 async def cmd_syncsheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not config.is_admin(config.get_current_user_id()):
+        if not await asyncio.to_thread(google_accounts.connected):
+            await update.message.reply_text("Connect your own Google account with /connectgoogle first.")
+            return
+        await send_rich_reply(update, await asyncio.to_thread(personal_sheets.sync_personal_sheets))
+        return
     await send_rich_reply(update, "⏳ Saving your records to Google Sheets...")
     res = await asyncio.to_thread(sheets_service.sync_all_to_sheets)
     if res.get("status") == "success":
@@ -906,6 +966,8 @@ def main():
     app = ApplicationBuilder().token(config.TELEGRAM_BOT_TOKEN).build()
 
     # Commands
+    app.add_handler(CommandHandler("myid", cmd_myid))
+    app.add_handler(CommandHandler(["connectgoogle", "confirmgoogle", "disconnectgoogle", "googlestatus"], cmd_google))
     app.add_handler(CommandHandler(["start", "help"], cmd_start))
     app.add_handler(CommandHandler(["device", "pc"], cmd_device))
     app.add_handler(CommandHandler("screenshot", cmd_screenshot))

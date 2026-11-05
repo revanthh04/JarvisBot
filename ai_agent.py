@@ -8,6 +8,8 @@ from google import genai
 from google.genai import types
 import openai
 import config
+import google_accounts
+import personal_sheets
 import notes_service
 import habits_service
 import tasks_service
@@ -123,7 +125,11 @@ def get_available_tools():
     if config.is_admin(config.get_current_user_id()):
         return tools_list
     private_modules = {"device_service", "calendar_service", "gmail_service", "sheets_service", "linkedin_service"}
-    return [tool for tool in tools_list if tool.__module__ not in private_modules]
+    available = [tool for tool in tools_list if tool.__module__ not in private_modules]
+    if google_accounts.connected():
+        available.extend(tool for tool in tools_list if tool.__module__ in {"gmail_service", "calendar_service"})
+        available.extend([personal_sheets.get_personal_sheets_link, personal_sheets.sync_personal_sheets])
+    return available
 
 def get_current_model_name() -> str:
     global current_model_idx
@@ -309,7 +315,8 @@ def direct_request(prompt: str):
 
 def rewrite_email_draft(draft: dict, tone: str) -> dict:
     if re.fullmatch(r"i\s+miss\s+(?:her|you)[.!]?", draft["body"].strip(), re.IGNORECASE):
-        return {"subject": "Thinking of you", "body": "Hello,\n\nI miss you and wanted to let you know that I am thinking of you.\n\nKind regards,\nRevanth" if tone == "formal" else "Hi,\n\nI miss you.\n\nRevanth"}
+        name = "Revanth" if config.is_admin(config.get_current_user_id()) else config.get_current_user_name()
+        return {"subject": "Thinking of you", "body": ("Hello,\n\nI miss you and wanted to let you know that I am thinking of you.\n\nKind regards,\n" if tone == "formal" else "Hi,\n\nI miss you.\n\n") + name}
     response = genai_client.models.generate_content(
         model=get_current_model_name(),
         contents="Rewrite this email in the chosen tone, preserving the facts and intent. "
@@ -330,7 +337,10 @@ def query_agent(prompt: str) -> str:
     email_reply = gmail_service.handle_email_reply(prompt, rewrite_email_draft)
     if email_reply is not None:
         return email_reply
-    direct = direct_request(prompt)
+    try:
+        direct = direct_request(prompt)
+    except google_accounts.NotConnected:
+        return "Connect your own Google account with /connectgoogle first."
     if direct is not None:
         return direct
     action_keywords = [

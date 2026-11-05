@@ -31,6 +31,9 @@ ENV = patch.dict(os.environ, {
     "GEMINI_API_KEY": "offline-test-key", "TELEGRAM_BOT_TOKEN": "123:test",
     "ALLOWED_USER_IDS": "", "OPEN_ACCESS": "false", "USER_TIMEZONE": "Asia/Kolkata",
     "SHEETS_DURABLE_STORAGE": "false",
+    "GOOGLE_ACCOUNTS_DATABASE_URL": "", "GOOGLE_ACCOUNTS_SQLITE": "",
+    "GOOGLE_ACCOUNTS_ENCRYPTION_KEY": "", "GOOGLE_OAUTH_WEB_CLIENT_JSON": "",
+    "GOOGLE_OAUTH_REDIRECT_URI": "",
 })
 ENV.start()
 atexit.register(ENV.stop)
@@ -430,7 +433,7 @@ class GoogleTests(IsolatedTest):
     def test_revoked_google_access_is_explained_without_raw_error(self):
         service = Mock()
         service.users.return_value.messages.return_value.send.return_value.execute.side_effect = RuntimeError("invalid_grant: Token has been expired or revoked.")
-        with patch.object(bot.gmail_service.os.path, "exists", return_value=True), patch("google.oauth2.credentials.Credentials.from_authorized_user_file"), patch("googleapiclient.discovery.build", return_value=service):
+        with patch.object(bot.gmail_service.os.path, "exists", return_value=True), patch("google_accounts.credentials"), patch("googleapiclient.discovery.build", return_value=service):
             result = bot.gmail_service._deliver_email("test@example.invalid", "Subject", "Body")
         self.assertIn("Google sign-in needs reconnecting", result)
         self.assertNotIn("invalid_grant", result)
@@ -463,7 +466,7 @@ class GoogleTests(IsolatedTest):
         service = Mock()
         service.users.return_value.messages.return_value.send.return_value.execute.return_value = {"id": "test-only"}
         with patch.object(bot.gmail_service.os.path, "exists", return_value=True), \
-             patch("google.oauth2.credentials.Credentials.from_authorized_user_file"), \
+             patch("google_accounts.credentials"), \
              patch("googleapiclient.discovery.build", return_value=service):
             bot.gmail_service._deliver_email("test@example.invalid", "Test", r"Hi Aishwarya,\n\nI miss you.\n\nWarmly,\nRevanth — ₹")
         raw = service.users.return_value.messages.return_value.send.call_args.kwargs["body"]["raw"]
@@ -503,7 +506,7 @@ class GoogleTests(IsolatedTest):
     def test_invalid_calendar_time_never_inserts_guessed_event(self):
         service = Mock()
         with patch.object(bot.calendar_service.os.path, "exists", return_value=True), \
-             patch("google.oauth2.credentials.Credentials.from_authorized_user_file"), \
+             patch("google_accounts.credentials"), \
              patch("googleapiclient.discovery.build", return_value=service):
             result = bot.calendar_service.add_calendar_event("Meeting", "not a real date")
         self.assertIn("no event was created", result)

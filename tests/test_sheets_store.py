@@ -330,6 +330,7 @@ class DurableStoreTests(IsolatedTest):
 
     def test_health_endpoint_reports_unready_store_without_private_details(self):
         handler = object.__new__(bot.HealthCheckHandler)
+        handler.path = "/"
         handler.send_response = Mock()
         handler.send_header = Mock()
         handler.end_headers = Mock()

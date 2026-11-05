@@ -1,20 +1,20 @@
 import config
+import google_accounts
 import os
 from datetime import datetime, timedelta
 import pytz
 
-@config.require_admin
+@google_accounts.require_connection
 def get_calendar_events(query: str = "", max_results: int = 15) -> str:
     token_path = os.path.join(os.path.dirname(__file__), "token.json")
-    if not os.path.exists(token_path):
+    if config.is_admin(config.get_current_user_id()) and not google_accounts.connected() and not os.path.exists(token_path):
         return "Google Calendar is not linked yet."
 
     try:
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
-        import config
 
-        creds = Credentials.from_authorized_user_file(token_path)
+        creds = google_accounts.credentials()
         service = build("calendar", "v3", credentials=creds)
 
         tz = config.get_tz()
@@ -57,20 +57,19 @@ def get_calendar_events(query: str = "", max_results: int = 15) -> str:
             output.append(f"• {summary} ({start})")
         return "\n".join(output)
     except Exception as e:
-        return f"Calendar retrieval error: {e}"
+        return google_accounts.error_message()
 
-@config.require_admin
+@google_accounts.require_connection
 def add_calendar_event(summary: str, start_time_str: str, duration_minutes: int = 60) -> str:
     token_path = os.path.join(os.path.dirname(__file__), "token.json")
-    if not os.path.exists(token_path):
+    if config.is_admin(config.get_current_user_id()) and not google_accounts.connected() and not os.path.exists(token_path):
         return "Google Calendar is not linked yet."
 
     try:
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
-        import config
 
-        creds = Credentials.from_authorized_user_file(token_path)
+        creds = google_accounts.credentials()
         service = build("calendar", "v3", credentials=creds)
 
         tz = config.get_tz()
@@ -107,4 +106,4 @@ def add_calendar_event(summary: str, start_time_str: str, duration_minutes: int 
         created = service.events().insert(calendarId="primary", body=event).execute()
         return f"Event created: '{summary}' on {start_dt.strftime('%A, %b %d, %Y at %I:%M %p')} (Link: {created.get('htmlLink')})"
     except Exception as e:
-        return f"Failed to add calendar event: {e}"
+        return google_accounts.error_message()
