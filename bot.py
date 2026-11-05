@@ -502,11 +502,14 @@ async def cmd_emails(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_linkedin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     if not args:
-        profile = linkedin_service.get_linkedin_profile()
+        profile = await asyncio.to_thread(linkedin_service.get_linkedin_profile)
         await send_rich_reply(update, f"💼 **LinkedIn Status:**\n\n{profile}\n\n_To post an update: `/linkedin Excited to announce...`_")
         return
     text_to_post = " ".join(args)
-    res = linkedin_service.post_to_linkedin(text_to_post)
+    if text_to_post.lower() in ("publish", "cancel"):
+        res = await asyncio.to_thread(linkedin_service.handle_post_reply, text_to_post.lower() + " linkedin")
+    else:
+        res = await asyncio.to_thread(linkedin_service.post_to_linkedin, text_to_post)
     await send_rich_reply(update, res)
 
 @restricted

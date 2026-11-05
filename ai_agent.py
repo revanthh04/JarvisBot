@@ -174,7 +174,7 @@ ANTI-HALLUCINATION & FACTUAL GROUNDING PROTOCOL:
 8. WEATHER: Always invoke `get_weather`.
 9. BOOKS & READING TRACKER: When asked about reading progress, books, or adding a new book to read, ALWAYS invoke `books_service` tools.
 10. GOOGLE SHEETS LIVE DATABASE: When asked to view, open, check, or link the Google Sheet, or sync records to Google Sheets, invoke `sheets_service.get_sheets_link` or `sheets_service.sync_google_sheets`.
-11. LINKEDIN: When asked to share/publish a post on LinkedIn or check LinkedIn profile status, invoke `linkedin_service.post_to_linkedin` or `linkedin_service.get_linkedin_profile`.
+11. LINKEDIN: Use `post_to_linkedin` to prepare a public post preview, or `get_linkedin_profile` to check connection. Preparing a draft never publishes it. Only the user's separate 'publish linkedin' confirmation can publish the exact preview. Never claim a draft was published. Do not call posting again just because the user asks to confirm.
 12. GMAIL & EMAILS: Use Gmail tools for email requests. `send_email` only prepares a draft, never delivers it. Ask the user to select formal, informal, or warm/personal tone, then show the preview and request 'send email' confirmation. Never claim an email was sent when a tool reports a draft. Do not invent a recipient; look up saved contacts or ask. Email body must be plain prose with actual paragraph breaks, not Markdown or HTML source.
 13. If any information is not present in the database or search, clearly tell the user that the information is not logged yet. NEVER fabricate imaginary records.
 
@@ -265,7 +265,11 @@ def _query_gemini_agent(prompt: str) -> str:
             session = get_or_create_chat_session(user_id)
             now = datetime.now(config.get_tz()).isoformat()
             previous_draft = gmail_service._drafts.get(user_id)
+            previous_post = linkedin_service._drafts.get(user_id)
             response = session.send_message(f"Current request time: {now}\n\n{prompt}")
+            post = linkedin_service._drafts.get(user_id)
+            if post is not None and post is not previous_post:
+                return linkedin_service.preview(post)
             draft = gmail_service._drafts.get(user_id)
             if draft is not None and draft is not previous_draft:
                 tone = re.search(r"\b(formal|informal|warm|personal)\b", prompt, re.IGNORECASE)
@@ -334,6 +338,9 @@ def query_agent(prompt: str) -> str:
     - If conversational or general English coaching, tries OpenAI ChatGPT first (if funded).
     - If OpenAI is exhausted or fails, falls back instantly to Gemini pool without user interruption.
     """
+    linkedin_reply = linkedin_service.handle_post_reply(prompt)
+    if linkedin_reply is not None:
+        return linkedin_reply
     email_reply = gmail_service.handle_email_reply(prompt, rewrite_email_draft)
     if email_reply is not None:
         return email_reply
