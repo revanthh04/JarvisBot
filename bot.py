@@ -140,6 +140,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(json.dumps({"status": "ok" if ready else "unavailable",
+                                    "revision": os.getenv("RENDER_GIT_COMMIT", "local"),
                                     "service": "YoBot AI Assistant", "storage": storage}).encode("utf-8"))
 
     def do_HEAD(self):
