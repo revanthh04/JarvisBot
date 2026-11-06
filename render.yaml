@@ -16,7 +16,7 @@ services:
       - key: OPEN_ACCESS
         value: "false"
       - key: SHEETS_DURABLE_STORAGE
-        value: "false"
+        value: "true"
       - key: GOOGLE_TOKEN_JSON
         sync: false
       - key: USER_TIMEZONE

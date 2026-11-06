@@ -16,19 +16,20 @@
 - A real cloud readback and a restore into separate temporary SQLite databases
   matched the recovery checksum.
 
-## Not active on Render yet
+## Active on Render
 
-The public health endpoint still reports storage.enabled=false. A recovery copy
-in Sheets is not the same as automatic persistence for new Telegram changes.
+The public health endpoint now reports enabled=true, ready=true, pending=false
+on revision c4316c1. Render has the verified working token and successfully
+restored the owner recovery snapshot on startup. The initial cloud snapshot and
+its temporary SQLite restore have been verified.
 
-Before activation, sign into the existing Render dashboard, install the current
-working local token as GOOGLE_TOKEN_JSON, retain the correct workbook ID, and set
-SHEETS_DURABLE_STORAGE=true. Save and deploy. Verify the health response reports
-enabled=true, ready=true, pending=false, then verify new writes and restart
-recovery. Never enable the flag before credentials and migration are verified.
+The current working local token was installed as GOOGLE_TOKEN_JSON and
+SHEETS_DURABLE_STORAGE=true was verified before saving and deploying. New writes
+are saved through the synchronous durable-storage hook. Guest data is excluded.
 
-The blueprint deliberately stays false until the credentials can be installed
-in the same deployment; otherwise the bot could fail closed at startup.
+The blueprint now retains true for subsequent deployments. Startup fails closed
+if the cloud recovery store cannot be read, preventing stale local snapshots
+from overwriting newer cloud records.
 
 ## Why authorization can expire
 
@@ -39,10 +40,9 @@ refresh tokens for these scopes. Other causes include revocation and, for Gmail
 scopes, password changes. An old Render GOOGLE_TOKEN_JSON can also differ from a
 newly authorized local token.
 
-The Cloud project is yo-bot-512509. Google Cloud is currently requesting the
-owner's password before its Audience settings can be inspected. The current
-publishing status is therefore not independently verified in this session.
-If it is Testing, review the applicable Production publishing requirements,
+The Cloud project is yo-bot-512509. Its Audience page was inspected in the correct
+personal Chrome profile and confirms External / Testing. Publishing is disabled
+until its Branding configuration is complete. Review Production requirements,
 then reauthorize after that change and update Render. Production removes the
 Testing-specific expiry; it does not make grants impossible to revoke.
 

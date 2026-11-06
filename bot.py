@@ -117,6 +117,16 @@ async def send_rich_reply(update: Update, text: str):
 # Lightweight HTTP Health Check Server (for 24/7 Render keep-alive)
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        from public_pages import html_page
+        page = html_page(urlsplit(self.path).path)
+        if page is not None:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            self.wfile.write(page)
+            return
         if urlsplit(self.path).path == "/google/callback":
             try:
                 if not google_accounts.setup_ready():
