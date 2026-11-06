@@ -785,6 +785,15 @@ async def check_reminders_job(context: ContextTypes.DEFAULT_TYPE):
         recipient_title = "REVANTH SIR" if config.is_admin(user_id) else "YOU"
 
         reminder_text = escape(rem["message"])
+        try:
+            from datetime import datetime
+            due_at = datetime.fromisoformat(rem.get("remind_at", ""))
+            if due_at.tzinfo is None:
+                due_at = config.get_tz().localize(due_at)
+            if (datetime.now(config.get_tz()) - due_at).total_seconds() > 90:
+                reminder_text += "\n<i>Delayed reminder, originally due " + escape(due_at.astimezone(config.get_tz()).strftime("%d %b, %I:%M %p")) + ".</i>"
+        except (ValueError, TypeError):
+            pass
         if is_rec and interval > 0:
             msg = (
                 f"⏰ <b>RECURRING REMINDER FOR {recipient_title}</b>\n\n"

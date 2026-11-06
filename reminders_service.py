@@ -4,6 +4,21 @@ import re
 from datetime import datetime, timedelta
 import pytz
 import config
+import contextvars
+
+_creation_receipt = contextvars.ContextVar("reminder_creation_receipt", default=None)
+
+def reset_creation_receipt():
+    _creation_receipt.set(None)
+
+def creation_receipt():
+    return _creation_receipt.get()
+
+def persistence_notice():
+    protected_by_sheets = config.SHEETS_DURABLE_STORAGE and config.is_admin(config.get_current_user_id())
+    if not protected_by_sheets and not os.getenv("JARVIS_PERSISTENT_DISK", "").lower() == "true":
+        return "Reminder saved on this server. A restart or deployment can erase it until permanent storage is connected; delivery is not guaranteed."
+    return ""
 
 DB_FILE = os.path.join(config.DATA_DIR, "reminders.db")
 
@@ -45,6 +60,7 @@ def _clean_reminder_message(raw_msg: str) -> str:
         r'^(?:so\s+)?(?:from\s+here\s+on\s+(?:words|out)\s+)?remind\s+(?:me\s+)?(?:to\s+|for\s+)?',
         r'^remind\s+(?:me\s+)?(?:to\s+|for\s+)?',
         r'^please\s+remind\s+(?:me\s+)?(?:to\s+|for\s+)?',
+        r'^(?:and\s+)?(?:please\s+)?(?:can\s+you\s+|could\s+you\s+)?remind\s+me\s+(?:to\s+|for\s+)?',
     ]
     for p in patterns_strip:
         msg = re.sub(p, '', msg, flags=re.IGNORECASE).strip()
@@ -258,7 +274,7 @@ def create_reminder(
     else:
         status_text = f"Reminder set for '{clean_msg}' at {formatted_time}."
 
-    return {
+    result = {
         "id": rem_id,
         "message": clean_msg,
         "remind_at": formatted_time,
@@ -266,16 +282,27 @@ def create_reminder(
         "repeat_interval_minutes": repeat_interval_minutes,
         "status": status_text
     }
+    notice = persistence_notice()
+    if notice:
+        result["status"] += "\n\n⚠️ " + notice
+    _creation_receipt.set(result)
+    return result
 
 def reconcile_overdue_at_startup() -> dict:
     """Do not replay historical alerts from a redeployed database snapshot."""
     now = datetime.now(config.get_tz())
+    # A verified durable restore contains genuine pending work, not the old
+    # checked-in snapshot. Let the delivery job catch it up instead of deleting it.
+    if os.getenv("JARVIS_PERSISTENT_DISK", "").lower() == "true":
+        return {"expired": 0, "rescheduled": 0}
     expired = rescheduled = 0
     conn = sqlite3.connect(DB_FILE)
     try:
         with conn:
-            rows = conn.execute("SELECT id, remind_at, is_recurring, repeat_interval_minutes FROM reminders WHERE triggered = 0").fetchall()
-            for reminder_id, raw_time, recurring, interval in rows:
+            rows = conn.execute("SELECT id, remind_at, is_recurring, repeat_interval_minutes, user_id FROM reminders WHERE triggered = 0").fetchall()
+            for reminder_id, raw_time, recurring, interval, uid in rows:
+                if config.SHEETS_DURABLE_STORAGE and config.is_admin(uid):
+                    continue
                 try:
                     due = datetime.fromisoformat(raw_time)
                     if due.tzinfo is None:
@@ -487,3 +514,28 @@ def list_active_reminders(user_id: int = None) -> list:
             "recurrence": recurrence_desc
         })
     return result
+
+def get_reminder_history(limit: int = 20) -> list:
+    """Return the authenticated user's recent records, including delivery state."""
+    uid = config.resolve_user_id()
+    conn = sqlite3.connect(DB_FILE)
+    try:
+        rows = conn.execute("SELECT id,message,remind_at,triggered,last_triggered_at FROM reminders WHERE user_id=? ORDER BY id DESC LIMIT ?", (uid, max(1, min(int(limit), 100)))).fetchall()
+        return [{"id": r[0], "message": r[1], "remind_at": r[2],
+                 "state": "delivered" if r[3] and r[4] else "closed without a delivery record" if r[3] else "pending",
+                 "last_delivered_at": r[4]} for r in rows]
+    finally:
+        conn.close()
+
+def describe_reminder_history() -> str:
+    rows = get_reminder_history()
+    if not rows:
+        return ("No reminder records are present in your current database. That does not prove one was never scheduled: "
+                "the server may have restarted and lost its local records. Permanent storage is needed to verify history across restarts.")
+    lines = ["Your recent reminder records:"]
+    for row in rows:
+        due = datetime.fromisoformat(row["remind_at"])
+        if due.tzinfo is None:
+            due = config.get_tz().localize(due)
+        lines.append(f"• #{row['id']} {row['message']} — {due.astimezone(config.get_tz()).strftime('%d %b %Y, %I:%M %p')}: {row['state']}")
+    return "\n".join(lines)

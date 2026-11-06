@@ -90,6 +90,7 @@ tools_list = [
     # Proactive Reminders
     reminders_service.create_reminder,
     reminders_service.list_active_reminders,
+    reminders_service.get_reminder_history,
     reminders_service.stop_recurring_reminders,
     reminders_service.delete_reminder,
     # Books & Reading Tracker Subsystem
@@ -256,6 +257,7 @@ def query_gemini_agent(prompt: str) -> str:
 
 def _query_gemini_agent(prompt: str) -> str:
     global current_model_idx, chat_sessions
+    reminders_service.reset_creation_receipt()
     user_id = config.get_current_user_id()
     attempts = 0
     max_attempts = len(MODELS_POOL)
@@ -267,6 +269,9 @@ def _query_gemini_agent(prompt: str) -> str:
             previous_draft = gmail_service._drafts.get(user_id)
             previous_post = linkedin_service._drafts.get(user_id)
             response = session.send_message(f"Current request time: {now}\n\n{prompt}")
+            receipt = reminders_service.creation_receipt()
+            if receipt:
+                return receipt["status"]
             post = linkedin_service._drafts.get(user_id)
             if post is not None and post is not previous_post:
                 return linkedin_service.preview(post)
@@ -276,8 +281,13 @@ def _query_gemini_agent(prompt: str) -> str:
                 if tone:
                     return gmail_service.handle_email_reply(tone.group(1).lower(), rewrite_email_draft)
                 return "Email not sent. Which tone would you like: formal, informal, or warm/personal?"
+            if re.search(r"\bremind\s+me\b|\b(?:set|create|add|schedule)\b.{0,30}\b(?:reminder|alarm)\b", prompt, re.IGNORECASE):
+                return "I could not verify that a reminder was saved. Please give me the reminder message and a future time; I will confirm only after saving it."
             return clean_jarvis_text(response.text)
         except Exception as e:
+            receipt = reminders_service.creation_receipt()
+            if receipt:
+                return receipt["status"]  # Do not rotate/retry after a successful write.
             err_str = str(e).lower()
             logger.warning(f"Model {get_current_model_name()} error ({e}). Rotating model...")
             current_model_idx = (current_model_idx + 1) % len(MODELS_POOL)
@@ -303,8 +313,12 @@ def direct_request(prompt: str):
         return result
     if re.fullmatch(r"(?:what(?:'s| is) (?:the )?)?(?:today(?:'s|s)? (?:date|data|datae)|(?:date|data|datae) of today)\s*[?!]*", text):
         return f"Today is {datetime.now(config.get_tz()).strftime('%A, %B %d, %Y')} ({config.USER_TIMEZONE})."
-    if re.match(r"^(?:please\s+)?remind me\b", text):
+    if re.match(r"^(?:and\s+)?(?:please\s+)?(?:(?:can|could)\s+you\s+)?remind\s+me\b", text):
         return reminders_service.create_reminder(message=prompt.strip().strip('"'))["status"]
+    if (re.search(r"\b(?:did\s+not|didn't|never)\s+(?:you\s+)?remind\b|\bmissed\s+(?:reminder|alarm)\b", text)
+            or re.search(r"\breminder\s+(?:history|logs?)\b", text)
+            or re.fullmatch(r"(?:show\s+)?(?:my\s+)?reminders[?!.]*", text)):
+        return reminders_service.describe_reminder_history()
     if re.fullmatch(r"(?:show (?:me )?)?(?:my |all my )?(?:expenses|spendings)(?: (?:till today|to date|on food|for food))?\s*[?!.]*", text):
         result = expenses_service.search_expenses(category="Food" if "food" in text else "")
         if not result["count"]:
@@ -338,6 +352,7 @@ def query_agent(prompt: str) -> str:
     - If conversational or general English coaching, tries OpenAI ChatGPT first (if funded).
     - If OpenAI is exhausted or fails, falls back instantly to Gemini pool without user interruption.
     """
+    reminders_service.reset_creation_receipt()
     linkedin_reply = linkedin_service.handle_post_reply(prompt)
     if linkedin_reply is not None:
         return linkedin_reply
