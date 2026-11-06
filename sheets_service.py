@@ -98,7 +98,8 @@ def get_credentials():
                 with open(TOKEN_FILE, "w", encoding="utf-8") as token_out:
                     token_out.write(creds.to_json())
             except Exception as ref_err:
-                logger.warning(f"Token refresh failed: {ref_err}")
+                logger.warning("Google Sheets authorization refresh failed (%s)", type(ref_err).__name__)
+                return None, "auth_expired"
 
         # Check if sheets scope is present
         scopes = getattr(creds, "scopes", []) or []
@@ -115,8 +116,8 @@ def get_sheets_service():
     creds, status = get_credentials()
     if not creds:
         return None, status
-    if status == "insufficient_scope":
-        return None, "insufficient_scope"
+    if status != "ok":
+        return None, status
     try:
         from googleapiclient.discovery import build
         import httplib2
@@ -403,7 +404,10 @@ def get_sheets_link() -> str:
     """
     url = get_spreadsheet_url()
     if url:
-        return f"Here is your live Google Sheets Second Brain: {url}"
+        _, auth_status = get_credentials()
+        if auth_status != "ok":
+            return f"Your saved Google workbook: {url}\nGoogle sync is disconnected. Reconnect Google before new records can be saved there."
+        return f"Your Google Sheets workbook: {url}"
     status = get_sync_status()
     if status.get("status_code") == "insufficient_scope":
         return "Google Sheets is pending one-time authorization. Run 'python setup_google.py' in your terminal to approve Google Sheets access."

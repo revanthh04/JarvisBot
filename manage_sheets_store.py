@@ -7,12 +7,13 @@ No Telegram polling or messages. Prints only counts/status, never row contents.
 """
 import argparse
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import importlib
 import json
 from pathlib import Path
 import sqlite3
 import tempfile
+import uuid
 from unittest.mock import patch
 
 import config
@@ -110,6 +111,59 @@ def verify_recovery(tables):
     return True
 
 
+def sanitize_initial_reminders(tables):
+    """Never import historical local alerts as newly pending cloud reminders."""
+    now = datetime.now(config.get_tz())
+    closed = advanced = 0
+    for row in tables["reminders"]:
+        if row["triggered"]:
+            continue
+        try:
+            due = datetime.fromisoformat(row["remind_at"])
+            if due.tzinfo is None:
+                due = config.get_tz().localize(due)
+        except (ValueError, TypeError):
+            due = now
+        if due > now:
+            continue
+        if row["is_recurring"] and (row["repeat_interval_minutes"] or 0) > 0:
+            row["remind_at"] = (now + timedelta(minutes=row["repeat_interval_minutes"])).isoformat()
+            advanced += 1
+        else:
+            row["triggered"] = 1
+            closed += 1
+    return {"historical_reminders_closed": closed, "recurring_reminders_advanced": advanced}
+
+
+def probe_fence(service, sid, meta):
+    """Verify duplicate-ID rejection and atomic validation without editing cells."""
+    from googleapiclient.errors import HttpError
+    sheet_id = meta["sheets"][0]["properties"]["sheetId"]
+    probe_id, second_id = uuid.uuid4().hex, uuid.uuid4().hex
+    def add(identifier):
+        return {"addNamedRange": {"namedRange": {"namedRangeId": identifier,
+                "name": "YOBOT_PROBE_" + identifier,
+                "range": {"sheetId": sheet_id, "startRowIndex": 0, "endRowIndex": 1,
+                          "startColumnIndex": 0, "endColumnIndex": 1}}}}
+    service.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": [add(probe_id)]}).execute()
+    rejected = False
+    try:
+        try:
+            service.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": [add(second_id), add(probe_id)]}).execute()
+        except HttpError as exc:
+            if exc.resp.status != 400:
+                raise
+            rejected = True
+        ids = {n["namedRangeId"] for n in store.metadata(service, sid).get("namedRanges", [])}
+        if not rejected or second_id in ids:
+            raise RuntimeError("Atomic storage fence was not verified")
+    finally:
+        service.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": [
+            {"deleteNamedRange": {"namedRangeId": probe_id}},
+            {"deleteNamedRange": {"namedRangeId": second_id}}]}).execute()
+    return {"duplicate_revision_rejected": True, "atomic_validation_verified": True}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bootstrap", action="store_true")
@@ -119,30 +173,21 @@ def main():
     service, sid = store.connect()
     meta = store.metadata(service, sid)
     if args.probe_fence:
-        # Invalid range must reject the batch; no existing object is addressed.
-        from googleapiclient.errors import HttpError
-        try:
-            service.spreadsheets().batchUpdate(spreadsheetId=sid, body={"requests": [
-                {"deleteNamedRange": {"namedRangeId": "yobot_nonexistent_probe_9a27c2d24d39410fa285ec3ac9499fbe"}}
-            ]}).execute()
-        except HttpError as exc:
-            if exc.resp.status == 400 and "named range" in str(exc).lower():
-                print(json.dumps({"fence_missing_revision_rejected": True}))
-                return
-            raise
-        raise RuntimeError("Sheets accepted a missing fence; do not enable storage")
+        print(json.dumps(probe_fence(service, sid, meta)))
+        return
     titles = {s["properties"]["title"] for s in meta["sheets"]}
     if args.bootstrap:
         if store.META_TAB in titles or any(t in titles for t in store.TABS.values()):
             raise ValueError("Store already exists; bootstrap will not overwrite it")
         tables, history_gaps = legacy_snapshot(service, sid, meta)
+        cleanup = sanitize_initial_reminders(tables)
         verify_recovery(tables)  # Validate DB constraints BEFORE changing cloud state.
         body, expected = store.batch_for_snapshot(tables, meta)
         service.spreadsheets().batchUpdate(spreadsheetId=sid, body=body).execute()
         state, verified = store.read_remote(service, sid)
         if state["revision"] != expected["revision"] or state["digest"] != expected["digest"]:
             raise ValueError("Bootstrap readback did not match")
-        print(json.dumps({"bootstrapped": True, "counts": state["counts"], "missing_habit_dates": history_gaps}))
+        print(json.dumps({"bootstrapped": True, "counts": state["counts"], "missing_habit_dates": history_gaps, **cleanup}))
     else:
         if store.META_TAB in titles:
             state, tables = store.read_remote(service, sid)
