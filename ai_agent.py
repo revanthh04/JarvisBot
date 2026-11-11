@@ -313,8 +313,10 @@ def direct_request(prompt: str):
         return result
     if re.fullmatch(r"(?:what(?:'s| is) (?:the )?)?(?:today(?:'s|s)? (?:date|data|datae)|(?:date|data|datae) of today)\s*[?!]*", text):
         return f"Today is {datetime.now(config.get_tz()).strftime('%A, %B %d, %Y')} ({config.USER_TIMEZONE})."
-    if re.match(r"^(?:and\s+)?(?:please\s+)?(?:(?:can|could)\s+you\s+)?remind\s+me\b", text):
-        return reminders_service.create_reminder(message=prompt.strip().strip('"'))["status"]
+    new_reminder = bool(re.match(r"^(?:and\s+)?(?:please\s+)?(?:(?:can|could)\s+you\s+)?remind\s+me\b", text))
+    reminder_reply = reminders_service.conversational_reminder(prompt.strip().strip('"'), new_reminder)
+    if reminder_reply is not None:
+        return reminder_reply
     if (re.search(r"\b(?:did\s+not|didn't|never)\s+(?:you\s+)?remind\b|\bmissed\s+(?:reminder|alarm)\b", text)
             or re.search(r"\breminder\s+(?:history|logs?)\b", text)
             or re.fullmatch(r"(?:show\s+)?(?:my\s+)?reminders[?!.]*", text)):

@@ -5,6 +5,39 @@ from datetime import datetime, timedelta
 import pytz
 import config
 import contextvars
+import time
+import threading
+
+_unfinished = {}
+_unfinished_lock = threading.RLock()
+
+def conversational_reminder(text, new_request):
+    """Hold an unscheduled request until the same user supplies a time."""
+    uid = config.get_current_user_id()
+    with _unfinished_lock:
+        pending = _unfinished.get(uid)
+        if pending and pending[0] <= time.monotonic():
+            _unfinished.pop(uid, None)
+            pending = None
+        if new_request:
+            _unfinished.pop(uid, None)
+            result = create_reminder(message=text)
+            if "id" in result:
+                return result["status"]
+            _unfinished[uid] = (time.monotonic() + 600, _clean_reminder_message(text))
+            return "What time should I remind you? Reply with a time like 5 pm, or cancel."
+        if not pending:
+            return None
+        if text.lower() in ("cancel", "cancel reminder"):
+            _unfinished.pop(uid)
+            return "Reminder cancelled."
+        match = re.fullmatch(r"(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?|in\s+\d+\s*(?:mins?|minutes?|hours?))", text, re.I)
+        if not match:
+            return None
+        result = create_reminder(message=pending[1], time_str=match.group(1))
+        if "id" in result:
+            _unfinished.pop(uid)
+        return result["status"]
 
 _creation_receipt = contextvars.ContextVar("reminder_creation_receipt", default=None)
 

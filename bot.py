@@ -116,6 +116,11 @@ async def send_rich_reply(update: Update, text: str):
 
 # Lightweight HTTP Health Check Server (for 24/7 Render keep-alive)
 class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        import telegram_webhook
+        self.send_response(telegram_webhook.receive(self))
+        self.end_headers()
+
     def do_GET(self):
         from public_pages import html_page
         page = html_page(urlsplit(self.path).path)
@@ -1034,7 +1039,11 @@ def main():
     print("  YoBot Executive Assistant is active & polling!  ")
     print("==================================================")
     
-    app.run_polling()
+    if os.getenv("RENDER_EXTERNAL_URL"):
+        import telegram_webhook
+        asyncio.run(telegram_webhook.serve(app, os.environ["RENDER_EXTERNAL_URL"], config.TELEGRAM_BOT_TOKEN))
+    else:
+        app.run_polling()
 
 if __name__ == "__main__":
     main()
