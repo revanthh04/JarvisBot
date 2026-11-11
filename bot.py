@@ -749,6 +749,39 @@ async def cmd_syncsheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = f"⚠️ **Sync notice:** {res.get('message', 'Failed to sync')}"
     await send_rich_reply(update, text)
 
+@restricted
+@admin_only
+async def cmd_repair(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not sheets_store.enabled():
+        await update.message.reply_text("Durable Sheets storage is disabled in Render.")
+        return
+    result = await asyncio.to_thread(sheets_store.sync_now)
+    await update.message.reply_text("Google Sheets matches the local owner records." if result.get("status") == "success" else sheets_store.recovery_advice())
+
+async def recover_pending_save(context: ContextTypes.DEFAULT_TYPE):
+    if not sheets_store.enabled():
+        return
+    state = context.job.data
+    if not sheets_store.health_status()["pending"]:
+        state.clear()
+        return
+    import time as clock
+    now = clock.monotonic()
+    if now < state.get("next", 0):
+        return
+    with config.user_context(config.ADMIN_USER_ID):
+        result = await asyncio.to_thread(sheets_store.sync_now)
+    if result.get("status") == "success":
+        state.clear()
+        await context.bot.send_message(chat_id=config.ADMIN_USER_ID, text="Google Sheets recovered. I verified the saved owner records.")
+        return
+    delay = min(900, 2 * state.get("delay", 15))
+    advice = sheets_store.recovery_advice()
+    state.update(delay=delay, next=now + delay)
+    if state.get("notice") != advice:
+        await context.bot.send_message(chat_id=config.ADMIN_USER_ID, text="Google Sheets still has a pending save. " + advice)
+        state["notice"] = advice
+
 async def scheduled_sheets_sync_job(context: ContextTypes.DEFAULT_TYPE):
     try:
         with config.user_context(config.ADMIN_USER_ID, "Revanth Sir"):
@@ -1008,6 +1041,7 @@ def main():
     app.add_handler(CommandHandler(["expenses", "expences", "expense"], cmd_expenses))
     app.add_handler(CommandHandler(["sheets", "sheet"], cmd_sheets))
     app.add_handler(CommandHandler("syncsheets", cmd_syncsheets))
+    app.add_handler(CommandHandler("repair", cmd_repair))
     app.add_handler(CommandHandler(["backup", "vault"], cmd_backup))
     app.add_handler(CommandHandler("habits", cmd_habits))
     app.add_handler(CommandHandler("weather", cmd_weather))
@@ -1033,6 +1067,7 @@ def main():
         job_queue.run_daily(scheduled_evening_habits, time(hour=21, minute=0, tzinfo=tz))
         job_queue.run_repeating(check_reminders_job, interval=15, first=5)
         job_queue.run_repeating(scheduled_sheets_sync_job, interval=1800, first=60)
+        job_queue.run_repeating(recover_pending_save, interval=30, first=30, data={})
         logger.info("Daily proactive scheduled jobs & dynamic reminder engine registered.")
 
     print("==================================================")

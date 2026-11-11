@@ -41,6 +41,14 @@ def mark_pending():
     global _pending
     _pending = True
 
+_issue = ""
+
+class StorageAccessError(RuntimeError):
+    pass
+
+def recovery_advice():
+    return _issue or "I will retry the save. Keep the bot running while changes are pending."
+
 
 def health_status():
     return {"enabled": enabled(), "ready": _ready, "pending": _pending, "last_sync": _last_sync}
@@ -50,7 +58,7 @@ def warning_text(user_id=None):
     user_id = config.get_current_user_id() if user_id is None else user_id
     if enabled() and user_id == config.ADMIN_USER_ID and (_pending or not _ready):
         return ("⚠️ Google Sheets save is pending. Recent changes are only on this server "
-                "and could be lost if it restarts. I will retry automatically; use /sheets to check.")
+                "and could be lost if it restarts. " + recovery_advice())
     return ""
 
 
@@ -110,7 +118,7 @@ def connect():
         service, status = sheets_service.get_sheets_service()
         sid = sheets_service.get_spreadsheet_id()
     if service is None or not sid:
-        raise RuntimeError("Google Sheets storage is not connected")
+        raise StorageAccessError(status if service is None else "missing_workbook")
     return service, sid
 
 
@@ -266,7 +274,8 @@ def replace_local(tables):
 
 
 def _accepted(state):
-    global _revision, _digest, _last_sync, _pending, _attempt
+    global _revision, _digest, _last_sync, _pending, _attempt, _issue
+    _issue = ""
     _revision, _digest, _last_sync = state["revision"], state["digest"], state["updated_at"]
     _pending, _attempt = False, None
     with config.user_context(config.ADMIN_USER_ID):
@@ -291,9 +300,8 @@ def restore_on_startup():
 
 
 def persist(vault):
-    global _attempt, _pending
+    global _attempt, _pending, _issue
     with _lock:
-        _pending = True
         try:
             if not _ready:
                 raise RuntimeError("Restore must succeed before writing")
@@ -306,7 +314,10 @@ def persist(vault):
             if _attempt and (state["revision"], state["digest"]) == _attempt:
                 _accepted(state)
             if state["revision"] != _revision or state["digest"] != _digest:
-                raise RuntimeError("Remote data changed; refusing stale overwrite")
+                if target_digest == state["digest"]:
+                    _accepted(state)
+                else:
+                    raise ValueError("Cloud and local records differ")
             if target_digest != _digest:
                 body, proposed = batch_for_snapshot(tables, meta, previous=_revision)
                 _attempt = (proposed["revision"], proposed["digest"])
@@ -319,6 +330,12 @@ def persist(vault):
                     "url": f"https://docs.google.com/spreadsheets/d/{sid}/edit"}
         except Exception as exc:
             _pending = True
+            if isinstance(exc, StorageAccessError) and str(exc) in ("auth_expired", "token_missing", "insufficient_scope"):
+                _issue = "Google authorization needs attention. Renew the owner's Google authorization and update GOOGLE_TOKEN_JSON in Render. Use /repair to verify."
+            elif isinstance(exc, ValueError):
+                _issue = "The records failed a consistency check. Preserve the local copy and review the workbook before restarting. I will leave both copies intact."
+            else:
+                _issue = "I will retry automatically. Use /repair for an immediate check."
             # API exceptions can include user values; log only the class.
             log.warning("Cloud save pending (%s); remote data preserved", type(exc).__name__)
             return {"status": "pending", "message": "Google Sheets save is pending; local data retained for retry."}

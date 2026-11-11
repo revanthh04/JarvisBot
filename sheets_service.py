@@ -99,7 +99,8 @@ def get_credentials():
                     token_out.write(creds.to_json())
             except Exception as ref_err:
                 logger.warning("Google Sheets authorization refresh failed (%s)", type(ref_err).__name__)
-                return None, "auth_expired"
+                from google.auth.exceptions import RefreshError
+                return None, "auth_expired" if isinstance(ref_err, RefreshError) and not getattr(ref_err, "retryable", False) else "refresh_unavailable"
 
         # Check if sheets scope is present
         scopes = getattr(creds, "scopes", []) or []
