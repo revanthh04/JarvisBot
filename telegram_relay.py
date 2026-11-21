@@ -16,6 +16,8 @@ NAMES = {config.ADMIN_USER_ID: "Revanth", AISHWARYA: "Aishwarya"}
 
 
 def connection(user_id, enable=None):
+    if config.SHEETS_DURABLE_STORAGE:
+        return cloud_state("linked" if enable is None else ("connect" if enable else "disconnect"))
     with closing(sqlite3.connect(DB)) as db, db:
         db.execute("CREATE TABLE IF NOT EXISTS linked (user_id INTEGER PRIMARY KEY)")
         if enable is True:
@@ -26,6 +28,8 @@ def connection(user_id, enable=None):
 
 
 def pending(action, body=None):
+    if config.SHEETS_DURABLE_STORAGE:
+        return cloud_state(action, body)
     # One outstanding message for the owner-to-Aishwarya link.
     with closing(sqlite3.connect(DB)) as db, db:
         db.execute("CREATE TABLE IF NOT EXISTS pending (id INTEGER PRIMARY KEY, body TEXT NOT NULL)")
@@ -38,8 +42,34 @@ def pending(action, body=None):
         return row[0] if row else None
 
 
+def cloud_state(action, body=None):
+    import sheets_store
+    service, sid = sheets_store.connect()
+    values = service.spreadsheets().values()
+    target = "'_telegram_relay'!A1:B1"
+    rows = values.get(spreadsheetId=sid, range=target).execute().get("values", [])
+    linked, queued = ((rows[0] if rows else []) + ["", ""])[:2]
+    if action == "linked":
+        return linked == "connected"
+    if action == "peek":
+        return queued
+    if action == "save" and queued:
+        return queued
+    if action == "connect":
+        linked = "connected"
+    elif action == "disconnect":
+        linked, queued = "", ""
+    elif action == "save":
+        queued = body
+    elif action == "take":
+        queued = ""
+    values.update(spreadsheetId=sid, range=target, valueInputOption="RAW",
+                  body={"values": [[linked, queued]]}).execute()
+    return rows[0][1] if action == "take" and rows and len(rows[0]) > 1 else None
+
+
 def parse_message(text, peer):
-    name = r"(?:Aishwarya(?: Patil)?|Ishwarya|my girlfriend|my girl friend)" if peer == AISHWARYA else r"Revanth(?: Sir)?"
+    name = r"(?:Aishwarya(?: Patil)?|Ishwarya|Ayshorya|Aishwarya|my girlfriend|my girl friend)" if peer == AISHWARYA else r"Revanth(?: Sir)?"
     start = r"(?:please\s+)?"
     for pattern in (
         start + r"(?:tell|ask|message|text|send (?:a |the )?(?:telegram )?message to)\s+" + name + r"(?:\s*[:,]\s*|\s+)(.+)",
@@ -60,12 +90,12 @@ async def deliver(bot, uid, peer, body):
                            reply_markup=ForceReply(input_field_placeholder="Type your reply"))
 
 
-async def handle(update, context):
+async def handle(update, context, transcript=None):
     msg = update.message
     uid = update.effective_user.id
     if uid not in NAMES or update.effective_chat.type != "private":
         return False
-    text = (msg.text or "").strip()
+    text = (transcript or msg.text or "").strip()
     connect = re.fullmatch(r"connect me(?: to|,)?\s+revanth[.!]?", text, re.I)
     if uid == AISHWARYA and (connect or text.casefold() == "disconnect from revanth"):
         enabled = bool(connect)
@@ -94,11 +124,14 @@ async def handle(update, context):
         body = parse_message(text, peer)
         if not body:
             if re.search(r"\b(?:send|sent|resend|repeat|message)\b", text, re.I) and (
-                re.search(r"\b(?:aishwarya|ishwarya|revanth|same message)\b", text, re.I)
+                re.search(r"\b(?:aishwarya|ishwarya|ayshorya|revanth|same message)\b", text, re.I)
             ):
                 waiting = pending("peek") if uid == config.ADMIN_USER_ID else None
                 status = "Your message is waiting for Aishwarya to connect." if waiting else "No message is queued."
                 await msg.reply_text(f"{status} To send on Telegram, say: Tell {NAMES[peer]} followed by your message.")
+                return True
+            if re.match(r"(?:please )?send (?:a |the )?(?:telegram )?message to ", text, re.I):
+                await msg.reply_text(f"Which Telegram contact did you mean? Try: Tell {NAMES[peer]} followed by your message.")
                 return True
             return False
     if not config.is_authorized(peer):

@@ -957,6 +957,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         transcript = await asyncio.to_thread(ai_agent.transcribe_audio, audio_data)
+        import telegram_relay
+        if await telegram_relay.handle(update, context, transcript):
+            return
         reply_text = await asyncio.to_thread(ai_agent.query_agent, transcript)
         warning = sheets_store.warning_text()
         if warning:
