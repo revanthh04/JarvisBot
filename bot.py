@@ -891,6 +891,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user_msg:
         return
 
+    import telegram_relay
+    if await telegram_relay.handle(update, context):
+        return
+
     # Instant normalization for backslash commands & aliases (e.g. \Expense, \expenses, \sheet)
     trimmed = user_msg.strip()
     if trimmed.startswith("\\") or trimmed.startswith("/"):
