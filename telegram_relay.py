@@ -1,4 +1,5 @@
 """Private Telegram relay for the owner's first linked contact."""
+from contextlib import closing
 import re
 import sqlite3
 from pathlib import Path
@@ -15,7 +16,7 @@ NAMES = {config.ADMIN_USER_ID: "Revanth", AISHWARYA: "Aishwarya"}
 
 
 def connection(user_id, enable=None):
-    with sqlite3.connect(DB) as db:
+    with closing(sqlite3.connect(DB)) as db, db:
         db.execute("CREATE TABLE IF NOT EXISTS linked (user_id INTEGER PRIMARY KEY)")
         if enable is True:
             db.execute("INSERT OR IGNORE INTO linked VALUES (?)", (user_id,))
@@ -24,16 +25,61 @@ def connection(user_id, enable=None):
         return bool(db.execute("SELECT 1 FROM linked WHERE user_id=?", (user_id,)).fetchone())
 
 
+def pending(action, body=None):
+    # One outstanding message for the owner-to-Aishwarya link.
+    with closing(sqlite3.connect(DB)) as db, db:
+        db.execute("CREATE TABLE IF NOT EXISTS pending (id INTEGER PRIMARY KEY, body TEXT NOT NULL)")
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT body FROM pending WHERE id=1").fetchone()
+        if action == "save" and not row:
+            db.execute("INSERT INTO pending VALUES (1,?)", (body,))
+        if action == "take" and row:
+            db.execute("DELETE FROM pending WHERE id=1")
+        return row[0] if row else None
+
+
+def parse_message(text, peer):
+    name = r"(?:Aishwarya(?: Patil)?|Ishwarya|my girlfriend|my girl friend)" if peer == AISHWARYA else r"Revanth(?: Sir)?"
+    start = r"(?:please\s+)?"
+    for pattern in (
+        start + r"(?:tell|ask|message|text|send (?:a |the )?(?:telegram )?message to)\s+" + name + r"(?:\s*[:,]\s*|\s+)(.+)",
+        start + r"send\s+(.+?)\s+to\s+" + name + r"[.!]?",
+    ):
+        m = re.fullmatch(pattern, text, re.I | re.S)
+        if m:
+            return m[1].strip().strip('“”"')
+    if re.search(r"\bto\s+" + name + r"\b", text, re.I):
+        resend = re.search(r'\bplease (?:re)?send(?: (?:it|us|her|him|again|immediately))*[, :]+"([^"]+)"[.!]?$', text, re.I)
+        if resend:
+            return resend[1]
+    return None
+
+
+async def deliver(bot, uid, peer, body):
+    await bot.send_message(chat_id=peer, text=f"Telegram message from {NAMES[uid]}:\n{body}",
+                           reply_markup=ForceReply(input_field_placeholder="Type your reply"))
+
+
 async def handle(update, context):
     msg = update.message
     uid = update.effective_user.id
     if uid not in NAMES or update.effective_chat.type != "private":
         return False
     text = (msg.text or "").strip()
-    if uid == AISHWARYA and text.casefold() in {LINK.casefold(), "disconnect from revanth"}:
-        enabled = text.casefold() == LINK.casefold()
+    connect = re.fullmatch(r"connect me(?: to|,)?\s+revanth[.!]?", text, re.I)
+    if uid == AISHWARYA and (connect or text.casefold() == "disconnect from revanth"):
+        enabled = bool(connect)
         connection(uid, enabled)
-        await msg.reply_text("Connected. You can now message Revanth through YoBot. To stop, say ‘disconnect from Revanth’." if enabled else "Disconnected from Revanth.")
+        queued = pending("take")
+        await msg.reply_text("Connected. You can now say ‘Send hello to Revanth’." if enabled else "Disconnected.")
+        if enabled and queued and config.is_authorized(config.ADMIN_USER_ID):
+            try:
+                await deliver(context.bot, config.ADMIN_USER_ID, uid, queued)
+            except TelegramError:
+                status = "Telegram delivery of your waiting message could not be confirmed."
+            else:
+                status = "Sent your waiting message to Aishwarya on Telegram."
+            await context.bot.send_message(chat_id=config.ADMIN_USER_ID, text=status)
         return True
 
     peer = AISHWARYA if uid == config.ADMIN_USER_ID else config.ADMIN_USER_ID
@@ -43,21 +89,35 @@ async def handle(update, context):
             and (original.text or "").startswith(prefix)):
         body = text
     else:
-        match = re.fullmatch(r"(?:please\s+)?(?:tell|ask|message|send a (?:telegram )?message to)\s+"
-                             r"(Aishwarya(?: Patil)?|Revanth)(?:\s*[:,]\s*|\s+)(.+)", text, re.I | re.S)
-        if not match or match[1].split()[0].casefold() != NAMES[peer].casefold():
+        if re.search(r"\b(?:email|gmail|e-mail)\b", text, re.I):
             return False
-        body = match[2].strip()
-    if not config.is_authorized(peer) or not connection(AISHWARYA):
-        await msg.reply_text("Aishwarya can enable private messages by sending YoBot: Connect me to Revanth")
+        body = parse_message(text, peer)
+        if not body:
+            if re.search(r"\b(?:send|sent|resend|repeat|message)\b", text, re.I) and (
+                re.search(r"\b(?:aishwarya|ishwarya|revanth|same message)\b", text, re.I)
+            ):
+                waiting = pending("peek") if uid == config.ADMIN_USER_ID else None
+                status = "Your message is waiting for Aishwarya to connect." if waiting else "No message is queued."
+                await msg.reply_text(f"{status} To send on Telegram, say: Tell {NAMES[peer]} followed by your message.")
+                return True
+            return False
+    if not config.is_authorized(peer):
+        await msg.reply_text("This Telegram contact is unavailable.")
         return True
     outgoing = f"Telegram message from {NAMES[uid]}:\n{body}"
     if len(outgoing.encode("utf-16-le")) // 2 > 4096:
         await msg.reply_text("Please shorten the message so it fits in one Telegram message.")
         return True
+    if not connection(AISHWARYA):
+        if uid == config.ADMIN_USER_ID:
+            previous = pending("save", body)
+            status = "An earlier message is already waiting." if previous else "Your message is waiting."
+            await msg.reply_text(status + " I can deliver it when Aishwarya sends ‘Connect me to Revanth’.")
+        else:
+            await msg.reply_text("To enable messaging, say: Connect me to Revanth")
+        return True
     try:
-        await context.bot.send_message(chat_id=peer, text=outgoing,
-                                       reply_markup=ForceReply(input_field_placeholder="Type your reply"))
+        await deliver(context.bot, uid, peer, body)
     except TelegramError:
         await msg.reply_text("Telegram delivery could not be confirmed.")
     else:
