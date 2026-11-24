@@ -9,7 +9,7 @@
 | :--- | :--- |
 | **Project Name** | **YoBot** (Executive Telegram AI Assistant & Second Brain) |
 | **Live Telegram Bot** | [@Revu04_bot](https://t.me/Revu04_bot) |
-| **GitHub Repository** | [github.com/revanthh04/JarvisBot](https://github.com/revanthh04/JarvisBot) |
+| **GitHub Repository** | [github.com/revanthh04/YoBot](https://github.com/revanthh04/YoBot) |
 | **Cloud Deployment** | Render Cloud Web Service ([jarvis-bot-rhuk.onrender.com](https://jarvis-bot-rhuk.onrender.com/)) |
 | **Primary Languages & Frameworks** | Python 3.13, `python-telegram-bot` (v20+ Async), SQLite3, REST APIs |
 | **AI / GenAI Models** | Google Gemini (3.5 Flash, 2.5 Flash, 3.7 Flash failover pool), OpenAI GPT-4o-mini |

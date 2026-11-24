@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: jarvis-bot
+    name: YoBot
     runtime: python
     plan: free
     region: singapore

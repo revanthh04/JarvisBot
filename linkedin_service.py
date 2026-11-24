@@ -54,7 +54,7 @@ def get_author_urn(token: str) -> str:
 
     headers = {
         "Authorization": f"Bearer {token}",
-        "User-Agent": "Jarvis-Bot"
+        "User-Agent": "YoBot-Bot"
     }
 
     # Try modern OpenID Connect userinfo endpoint
@@ -92,7 +92,7 @@ def get_linkedin_profile() -> str:
 
     headers = {
         "Authorization": f"Bearer {token}",
-        "User-Agent": "Jarvis-Bot"
+        "User-Agent": "YoBot-Bot"
     }
 
     # Check OpenID userinfo

@@ -42,7 +42,7 @@ def test_config():
 # 2. Notes Service
 def test_notes():
     import notes_service
-    note = notes_service.add_note("Test content for Jarvis", "Diagnostic Note", "test")
+    note = notes_service.add_note("Test content for YoBot", "Diagnostic Note", "test")
     assert note["id"] > 0
     results = notes_service.search_notes("Diagnostic")
     assert len(results) > 0
@@ -91,9 +91,9 @@ def test_device():
     import device_service
     stats = device_service.get_system_stats()
     assert "cpu_percent" in stats
-    device_service.set_clipboard("Jarvis Test Clipboard")
+    device_service.set_clipboard("YoBot Test Clipboard")
     clip = device_service.get_clipboard()
-    assert "Jarvis Test Clipboard" in clip
+    assert "YoBot Test Clipboard" in clip
 
 # 7. Weather Service
 def test_weather():
@@ -124,7 +124,7 @@ def test_cricket():
 # 11. Voice Service
 def test_voice():
     import voice_service
-    audio_file = voice_service.synthesize_sync("Jarvis diagnostics passed.")
+    audio_file = voice_service.synthesize_sync("YoBot diagnostics passed.")
     assert os.path.exists(audio_file)
     if os.path.exists(audio_file):
         os.remove(audio_file)
@@ -169,7 +169,7 @@ def test_dual_brain():
     assert openai_res is None or isinstance(openai_res, str)
     # Verify overall query_agent works seamlessly with fallback
     reply = ai_agent.query_agent("Introduce yourself briefly as Revanth Sir's assistant.")
-    assert "Revanth" in reply or "YoBot" in reply or "JARVIS" in reply or len(reply) > 10
+    assert "Revanth" in reply or "YoBot" in reply or len(reply) > 10
 
 # 16. Data Guardian Vault & Persistence
 def test_data_guardian():

@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 
 def get_live_cricket_scores() -> list:
     url = "https://static.cricinfo.com/rss/livescores.xml"
-    headers = {"User-Agent": "JarvisBot/1.0"}
+    headers = {"User-Agent": "YoBot/1.0"}
     try:
         resp = requests.get(url, headers=headers, timeout=8)
         resp.raise_for_status()

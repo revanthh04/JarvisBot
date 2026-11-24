@@ -1,9 +1,9 @@
-# Project Codex: Jarvis (YoBot) Executive AI Assistant
+# Project Codex: YoBot Executive AI Assistant
 
 > Historical handoff. See BUGFIX_REPORT.md for the November 3, 2026 code audit, verified fixes, and limitations. Claims of working integrations below are from the handoff and were not all live-verified during the audit.
 
 ## 1. Project Overview & Identity
-- **Project Name:** YoBot / Jarvis Executive Assistant
+- **Project Name:** YoBot Executive Assistant
 - **Target Platform:** Telegram Bot (`python-telegram-bot` v21+ with JobQueue & async polling)
 - **Primary User / Admin:** Revanth Sir (`ADMIN_USER_ID = 5484600217`)
 - **Default Timezone:** `Asia/Kolkata` (IST)
@@ -149,7 +149,7 @@ All local persistent databases use SQLite3 and maintain automated backups via `b
 1. **`device_service.py`**:
    - Telemetry: CPU %, RAM %, Disk Free, Battery level.
    - Remote controls: Lock workstation (`ctypes.windll.user32.LockWorkStation()`), adjust volume, read/write clipboard.
-2. **`run_jarvis_silently.vbs`**:
+2. **`run_yobot_silently.vbs`**:
    - Headless background launcher for Windows using `pythonw.exe`.
 
 ---
@@ -193,5 +193,5 @@ LINKEDIN_PERSON_URN=
 4. **LinkedIn**:
    - Service is written and wired into `ai_agent.py` and `bot.py` (`/linkedin`). Awaiting LinkedIn developer token.
 5. **Git Status**:
-   - Remote repository: `https://github.com/revanthh04/JarvisBot.git` on branch `main`.
+   - Remote repository: `https://github.com/revanthh04/YoBot.git` on branch `main`.
    - Working tree has pending modified files and new files (`linkedin_service.py`, `sheets_service.py`, `sheets_config.json`) ready to commit.

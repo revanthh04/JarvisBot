@@ -20,13 +20,13 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
-SANDBOX = tempfile.TemporaryDirectory(prefix="jarvis-regressions-")
+SANDBOX = tempfile.TemporaryDirectory(prefix="yobot-regressions-")
 atexit.register(SANDBOX.cleanup)
 for source in ROOT.glob("*.py"):
     shutil.copy2(source, Path(SANDBOX.name) / source.name)
 sys.path.insert(0, SANDBOX.name)
 ENV = patch.dict(os.environ, {
-    "JARVIS_DATA_DIR": SANDBOX.name,
+    "YOBOT_DATA_DIR": SANDBOX.name,
     "GOOGLE_TOKEN_JSON": "", "GOOGLE_SPREADSHEET_ID": "", "OPENAI_API_KEY": "",
     "GEMINI_API_KEY": "offline-test-key", "TELEGRAM_BOT_TOKEN": "123:test",
     "ALLOWED_USER_IDS": "", "OPEN_ACCESS": "false", "USER_TIMEZONE": "Asia/Kolkata",
@@ -269,9 +269,35 @@ class BackupTests(IsolatedTest):
 
 
 class RoutingAndJobsTests(IsolatedTest):
+    def test_speak_failure_returns_full_text_in_chunks(self):
+        text = "hello " * 800
+        update = SimpleNamespace(effective_user=SimpleNamespace(id=OTHER, first_name="Guest"),
+                                 message=SimpleNamespace(reply_voice=AsyncMock(), reply_text=AsyncMock()))
+        ctx = SimpleNamespace(args=[text])
+        with patch.object(bot.voice_service, "text_to_speech", new=AsyncMock(side_effect=RuntimeError("offline"))):
+            asyncio.run(bot.cmd_speak(update, ctx))
+        chunks = [call.args[0] for call in update.message.reply_text.await_args_list][1:]
+        self.assertEqual("".join(chunks), text)
+        self.assertTrue(all(len(chunk) <= 4000 for chunk in chunks))
+        update.message.reply_voice.assert_not_awaited()
+
+    def test_voice_failure_keeps_generated_answer_without_repeating_action(self):
+        update = SimpleNamespace(effective_user=SimpleNamespace(id=OTHER, first_name="Guest"),
+                                 effective_chat=SimpleNamespace(id=OTHER),
+                                 message=SimpleNamespace(voice=SimpleNamespace(file_id="voice"), audio=None,
+                                                         reply_voice=AsyncMock(), reply_text=AsyncMock()))
+        ctx = SimpleNamespace(bot=SimpleNamespace(send_chat_action=AsyncMock(),
+                              get_file=AsyncMock(return_value=SimpleNamespace(download_to_memory=AsyncMock()))))
+        with patch.object(ai_agent, "transcribe_audio", return_value="Remember this"), \
+             patch.object(ai_agent, "query_agent", return_value="Saved your note") as query, \
+             patch.object(bot.voice_service, "text_to_speech", new=AsyncMock(side_effect=RuntimeError("offline"))):
+            asyncio.run(bot.handle_voice(update, ctx))
+        query.assert_called_once_with("Remember this")
+        update.message.reply_text.assert_any_await("Saved your note")
+
     def test_code_formatting_does_not_leak_internal_placeholders(self):
-        result = bot.markdown_to_telegram_html("Notice: `jarvis-bot` exceeded memory.\n```\na < b\n```")
-        self.assertIn("<code>jarvis-bot</code>", result)
+        result = bot.markdown_to_telegram_html("Notice: `yobot-bot` exceeded memory.\n```\na < b\n```")
+        self.assertIn("<code>yobot-bot</code>", result)
         self.assertIn("a &lt; b", result)
         self.assertNotIn("INLINECODE", result)
         self.assertNotIn("CODEBLOCK", result)

@@ -49,7 +49,7 @@ def creation_receipt():
 
 def persistence_notice():
     protected_by_sheets = config.SHEETS_DURABLE_STORAGE and config.is_admin(config.get_current_user_id())
-    if not protected_by_sheets and not os.getenv("JARVIS_PERSISTENT_DISK", "").lower() == "true":
+    if not protected_by_sheets and not os.getenv("YOBOT_PERSISTENT_DISK", os.getenv("JARVIS_PERSISTENT_DISK", "")).lower() == "true":
         return "Reminder saved on this server. A restart or deployment can erase it until permanent storage is connected; delivery is not guaranteed."
     return ""
 
@@ -326,7 +326,7 @@ def reconcile_overdue_at_startup() -> dict:
     now = datetime.now(config.get_tz())
     # A verified durable restore contains genuine pending work, not the old
     # checked-in snapshot. Let the delivery job catch it up instead of deleting it.
-    if os.getenv("JARVIS_PERSISTENT_DISK", "").lower() == "true":
+    if os.getenv("YOBOT_PERSISTENT_DISK", os.getenv("JARVIS_PERSISTENT_DISK", "")).lower() == "true":
         return {"expired": 0, "rescheduled": 0}
     expired = rescheduled = 0
     conn = sqlite3.connect(DB_FILE)

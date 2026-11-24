@@ -60,8 +60,8 @@ Simply open [@Revu04_bot](https://t.me/Revu04_bot) on Telegram and start chattin
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/revanthh04/JarvisBot.git
-   cd JarvisBot
+   git clone https://github.com/revanthh04/YoBot.git
+   cd YoBot
    ```
 
 2. **Create and activate a virtual environment:**
@@ -126,9 +126,9 @@ The original diagnostics are available only through `python test_suite.py --live
 
 Access is closed by default (`OPEN_ACCESS=false`). The admin and IDs in `ALLOWED_USER_IDS` can use the bot; Gmail, Calendar, Sheets, LinkedIn, and workstation controls are admin-only. AI-provided user IDs cannot override the authenticated user. The admin's Google Sheet exports only the admin's records and is a **one-way SQLite export**, not a two-way database.
 
-`JARVIS_DATA_DIR` optionally selects the directory containing all six SQLite files, `data_vault_backup.json`, and `sheets_config.json`. If omitted, the project directory is used as before. Before switching directories, stop the bot and copy the existing databases and vault into the new directory, then restart one bot instance. Do not point it at an empty directory expecting an automatic migration.
+`YOBOT_DATA_DIR` optionally selects the directory containing all six SQLite files, `data_vault_backup.json`, and `sheets_config.json`. If omitted, the project directory is used as before. Before switching directories, stop the bot and copy the existing databases and vault into the new directory, then restart one bot instance. Do not point it at an empty directory expecting an automatic migration.
 
-The checked-in Render blueprint still uses the free plan. Render documents that local files are lost on restarts, redeploys, and spin-downs, and that persistent disks require a paid service: [free service limitations](https://render.com/docs/free#local-files-lost-on-redeploy), [persistent disk setup](https://render.com/docs/disks). After provisioning a persistent mount such as `/var/data`, set `JARVIS_DATA_DIR` to that mount and migrate the existing data before starting the bot. A local vault alone is not an off-server backup.
+The checked-in Render blueprint still uses the free plan. Render documents that local files are lost on restarts, redeploys, and spin-downs, and that persistent disks require a paid service: [free service limitations](https://render.com/docs/free#local-files-lost-on-redeploy), [persistent disk setup](https://render.com/docs/disks). After provisioning a persistent mount such as `/var/data`, set `YOBOT_DATA_DIR` to that mount and migrate the existing data before starting the bot. A local vault alone is not an off-server backup.
 
 See [BUGFIX_REPORT.md](BUGFIX_REPORT.md) for verified fixes and remaining work.
 
@@ -139,3 +139,21 @@ The bot runs on the free Render web service configured by render.yaml; GitHub st
 The new opt-in storage code includes all seven admin tables, startup recovery, atomic snapshots, deletion recovery, stale-writer checks, and pending-save warnings. Guest records are excluded from the admin workbook. Use manage_sheets_store.py --bootstrap once only after validating Google access, then --verify-recovery. Do not enable the flag before successful migration. Recovery tabs and dashboard views are managed by the bot; edit records through Telegram. Free Render availability limits still apply.
 
 The reminder parser now accepts after, within and with in as relative delays, and Telegram code formatting no longer exposes internal placeholders. Tests cover the reported examples. Live Google refresh currently reports invalid_grant and needs reauthorization before migration can be completed.
+
+### Free voice replies
+
+YoBot uses `edge-tts` (Microsoft Edge online speech). No voice API key,
+subscription, or payment method is required. This community integration is not
+an official Azure API and availability is not guaranteed. There is no paid TTS
+fallback. Send `/speak Hello YoBot` to hear it, or send a voice note for a spoken
+reply. If speech generation fails, times out, or the reply is too long, YoBot
+returns the text instead.
+
+The default voice is Indian English `en-IN-PrabhatNeural` with natural pitch.
+Optional environment settings: `TTS_VOICE`, `TTS_PITCH` (default `+0Hz`),
+`TTS_RATE` (default `+0%`). Speech is limited to 3,000 characters per reply.
+
+Branding is now **YoBot**, including the GitHub repository and Render service.
+The existing Render hostname is retained for Telegram webhooks and Google OAuth
+callbacks. `JARVIS_DATA_DIR` and `JARVIS_PERSISTENT_DISK` remain accepted as legacy
+aliases; new installations should use `YOBOT_DATA_DIR` and `YOBOT_PERSISTENT_DISK`.

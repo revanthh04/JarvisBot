@@ -33,7 +33,7 @@ for catch-up delivery. Messages delayed by more than 90 seconds show their
 original scheduled time. With the old ephemeral snapshot, startup still closes
 historical overdue reminders to prevent repeated unwanted alerts. A paid
 persistent disk installation can opt into catch-up only after setting
-JARVIS_DATA_DIR to the persistent mount and JARVIS_PERSISTENT_DISK=true.
+YOBOT_DATA_DIR to the persistent mount and YOBOT_PERSISTENT_DISK=true.
 
 Neither SQLite nor Sheets solves free-host sleep or downtime. Even with durable
 records, an offline bot cannot deliver at the scheduled minute. Delivery can

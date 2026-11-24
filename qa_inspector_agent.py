@@ -317,7 +317,7 @@ except Exception as e:
 # Parameter 11: Executive Persona & Salutation Compliance
 # ------------------------------------------------------------------
 try:
-    greet_reply = ai_agent.query_agent("Hello Jarvis, give me a quick status check.")
+    greet_reply = ai_agent.query_agent("Hello YoBot, give me a quick status check.")
     has_salutation = "Revanth Sir" in greet_reply
     log_param(11, "Executive Persona & Salutation", has_salutation,
               f"Agent salutation check: 'Revanth Sir' in response: {has_salutation}")

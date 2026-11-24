@@ -294,8 +294,8 @@ class DurableStoreTests(IsolatedTest):
         store.mark_pending()
         update = SimpleNamespace(
             effective_user=SimpleNamespace(id=config.ADMIN_USER_ID, first_name="Admin"),
-            effective_chat=SimpleNamespace(id=config.ADMIN_USER_ID),
-            message=SimpleNamespace(voice=SimpleNamespace(file_id="voice"), audio=None,
+            effective_chat=SimpleNamespace(id=config.ADMIN_USER_ID, type="private"),
+            message=SimpleNamespace(voice=SimpleNamespace(file_id="voice"), audio=None, reply_to_message=None,
                                     reply_text=AsyncMock(), reply_voice=AsyncMock()))
         context = SimpleNamespace(bot=SimpleNamespace(
             send_chat_action=AsyncMock(), get_file=AsyncMock(return_value=SimpleNamespace(download_to_memory=AsyncMock()))))

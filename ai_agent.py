@@ -106,7 +106,7 @@ tools_list = [
     linkedin_service.get_linkedin_profile
 ]
 
-def clean_jarvis_text(text: str) -> str:
+def clean_yobot_text(text: str) -> str:
     if not text:
         return ""
     # Strip any occurrences of triple or quadruple asterisks
@@ -239,7 +239,7 @@ def query_openai(prompt: str) -> str:
             timeout=4.0
         )
         if completion and completion.choices and completion.choices[0].message:
-            return clean_jarvis_text(completion.choices[0].message.content or "")
+            return clean_yobot_text(completion.choices[0].message.content or "")
         return None
     except Exception as e:
         err_msg = str(e).lower()
@@ -283,7 +283,7 @@ def _query_gemini_agent(prompt: str) -> str:
                 return "Email not sent. Which tone would you like: formal, informal, or warm/personal?"
             if re.search(r"\bremind\s+me\b|\b(?:set|create|add|schedule)\b.{0,30}\b(?:reminder|alarm)\b", prompt, re.IGNORECASE):
                 return "I could not verify that a reminder was saved. Please give me the reminder message and a future time; I will confirm only after saving it."
-            return clean_jarvis_text(response.text)
+            return clean_yobot_text(response.text)
         except Exception as e:
             receipt = reminders_service.creation_receipt()
             if receipt:
@@ -419,7 +419,7 @@ def analyze_image(image_bytes: bytes, prompt: str = "Analyze this image and desc
             m_name = get_current_model_name()
             part = types.Part.from_bytes(data=image_bytes, mime_type=mime)
             res = genai_client.models.generate_content(model=m_name, contents=[prompt, part])
-            return clean_jarvis_text(res.text)
+            return clean_yobot_text(res.text)
         except Exception as e:
             current_model_idx = (current_model_idx + 1) % len(MODELS_POOL)
             attempts += 1
@@ -435,7 +435,7 @@ def analyze_audio(audio_bytes: bytes, prompt: str = "Listen to this audio voice 
             m_name = get_current_model_name()
             part = types.Part.from_bytes(data=audio_bytes, mime_type=mime)
             res = genai_client.models.generate_content(model=m_name, contents=[prompt, part])
-            return clean_jarvis_text(res.text)
+            return clean_yobot_text(res.text)
         except Exception as e:
             current_model_idx = (current_model_idx + 1) % len(MODELS_POOL)
             attempts += 1

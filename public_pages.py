@@ -58,4 +58,4 @@ def html_page(path):
             f"<title>{title}</title><style>body{{max-width:760px;margin:48px auto;padding:0 24px;font:17px/1.6 system-ui;color:#172536}}a{{color:#1554ad}}</style>"
             f"<main><h1>{title}</h1>{paragraphs}<p><a href='/about'>About</a> · <a href='/privacy'>Privacy</a> · "
             "<a href='https://t.me/Revu04_bot'>Open YoBot</a> · "
-            "<a href='https://github.com/revanthh04/JarvisBot/issues'>Project support</a></p></main></html>").encode()
+            "<a href='https://github.com/revanthh04/YoBot/issues'>Project support</a></p></main></html>").encode()

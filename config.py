@@ -23,7 +23,7 @@ ADMIN_USER_ID = 5484600217
 OPEN_ACCESS = os.getenv("OPEN_ACCESS", "false").lower() in ("true", "1", "yes")
 SHEETS_DURABLE_STORAGE = os.getenv("SHEETS_DURABLE_STORAGE", "false").lower() in ("true", "1", "yes")
 
-DATA_DIR = os.path.abspath(os.getenv("JARVIS_DATA_DIR", os.path.dirname(__file__)))
+DATA_DIR = os.path.abspath(os.getenv("YOBOT_DATA_DIR", os.getenv("JARVIS_DATA_DIR", os.path.dirname(__file__))))
 os.makedirs(DATA_DIR, exist_ok=True)
 # Remember this before service imports create their empty tables.
 MISSING_DATABASES = {

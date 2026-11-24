@@ -1,4 +1,4 @@
-# Jarvis bug-fix pass — November 3, 2026
+# YoBot bug-fix pass — November 3, 2026
 
 Scope: local code audit and offline regressions. The initial checkout was clean at `263aad5`. No deployment, real email, LinkedIn publication, Telegram polling, or live Google Sheets synchronization was performed. Existing personal databases and credentials were not used for tests.
 
@@ -25,7 +25,7 @@ Scope: local code audit and offline regressions. The initial checkout was clean 
 | Invalid Calendar dates silently scheduled an event tomorrow at 10 AM. | Invalid dates or nonpositive durations return an error without creating an event. |
 | The default diagnostics mutated live data, clipboard, and Sheets. | `python test_suite.py` runs isolated regression tests. Legacy diagnostics require the explicit `--live` flag. |
 | Google API client dependency was missing from installation requirements. | Added `google-api-python-client`. |
-| The handoff document embedded a bot token and documentation overstated cloud durability. | Token replaced with a placeholder; documentation corrected; configurable `JARVIS_DATA_DIR` added for persistent storage. |
+| The handoff document embedded a bot token and documentation overstated cloud durability. | Token replaced with a placeholder; documentation corrected; configurable `YOBOT_DATA_DIR` added for persistent storage. |
 
 ## Validation
 
@@ -38,7 +38,7 @@ Scope: local code audit and offline regressions. The initial checkout was clean 
 ## Remaining work and operational limits
 
 1. **Rotate the exposed Telegram bot token through BotFather**, then update local and Render secrets. Removing the value from the current document does not remove it from Git history. Repository history also tracks personal databases and a JSON vault; review repository visibility and plan a separate history/data cleanup without deleting the working data.
-2. **Provision durable cloud storage and migrate existing records.** The checked-in Render configuration uses the free plan. Its filesystem is ephemeral, and persistent disks require a paid service. The code supports a mounted `JARVIS_DATA_DIR`, but no storage was purchased or deployed. Sources: [Render free-service limits](https://render.com/docs/free#local-files-lost-on-redeploy), [persistent disks](https://render.com/docs/disks). Keep separate off-server backups.
+2. **Provision durable cloud storage and migrate existing records.** The checked-in Render configuration uses the free plan. Its filesystem is ephemeral, and persistent disks require a paid service. The code supports a mounted `YOBOT_DATA_DIR`, but no storage was purchased or deployed. Sources: [Render free-service limits](https://render.com/docs/free#local-files-lost-on-redeploy), [persistent disks](https://render.com/docs/disks). Keep separate off-server backups.
 3. **Update Render's Google token and verify scopes live.** The environment-variable entry is now in the blueprint; the remote secret was not changed. Gmail send verification needs an explicitly chosen test recipient and content.
 4. **Validate live model availability and retry behavior.** The configured Gemini model pool was not changed or contacted. Automatic retries after partial tool execution can still duplicate side effects; idempotency needs a separate change.
 5. **Finish reminder language coverage.** This is a limited parser, not a general date parser. Compound durations, arbitrary date phrases, ambiguous bare hours, and non-IST daylight-saving transitions need further work. Daily recurrence currently uses fixed elapsed minutes.

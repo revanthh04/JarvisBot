@@ -5,7 +5,7 @@ def get_weather(city: str = "Hyderabad") -> dict:
         city = "Hyderabad"
     city = city.strip()
     url = f"https://wttr.in/{city}?format=j1"
-    headers = {"User-Agent": "JarvisBot/1.0"}
+    headers = {"User-Agent": "YoBot/1.0"}
 
     try:
         resp = requests.get(url, headers=headers, timeout=8)

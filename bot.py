@@ -792,12 +792,17 @@ async def scheduled_sheets_sync_job(context: ContextTypes.DEFAULT_TYPE):
 @restricted
 async def cmd_speak(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = " ".join(context.args) if context.args else "Hello, YoBot is at your service."
-    audio_path = await voice_service.text_to_speech(text)
+    audio_path = None
     try:
+        audio_path = await voice_service.text_to_speech(text)
         with open(audio_path, "rb") as voice_file:
             await update.message.reply_voice(voice=voice_file)
+    except Exception:
+        await update.message.reply_text("Voice is unavailable right now. Here is the text:")
+        for start in range(0, len(text), 4000):
+            await update.message.reply_text(text[start:start + 4000])
     finally:
-        if os.path.exists(audio_path):
+        if audio_path and os.path.exists(audio_path):
             os.remove(audio_path)
 
 @restricted
@@ -968,12 +973,17 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Captions are truncated below; always make a pending save visible in text too.
             await update.message.reply_text(warning)
         
-        reply_audio = await voice_service.text_to_speech(reply_text)
+        reply_audio = None
         try:
+            reply_audio = await voice_service.text_to_speech(reply_text)
             with open(reply_audio, "rb") as v_out:
                 await update.message.reply_voice(voice=v_out, caption=f"🗣️ {reply_text[:200]}")
+        except Exception:
+            await update.message.reply_text("Voice is unavailable right now. Here is my reply:")
+            for start in range(0, len(reply_text), 4000):
+                await update.message.reply_text(reply_text[start:start + 4000])
         finally:
-            if os.path.exists(reply_audio):
+            if reply_audio and os.path.exists(reply_audio):
                 os.remove(reply_audio)
     except Exception as e:
         await update.message.reply_text(f"YoBot voice error: {e}")

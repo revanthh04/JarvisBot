@@ -27,7 +27,7 @@ def get_system_stats() -> dict:
 @config.require_admin
 def take_screenshot() -> bytes:
     if platform.system() != "Windows":
-        raise RuntimeError("Desktop screenshots require Jarvis to run locally on your PC (Currently hosted on Cloud Linux).")
+        raise RuntimeError("Desktop screenshots require YoBot to run locally on your PC (Currently hosted on Cloud Linux).")
     try:
         from PIL import ImageGrab
         img = ImageGrab.grab()
@@ -50,7 +50,7 @@ def lock_workstation() -> bool:
 def set_volume(action: str) -> str:
     """Action: mute, unmute, up, down"""
     if platform.system() != "Windows":
-        return "PC volume controls require Jarvis to run locally on your PC."
+        return "PC volume controls require YoBot to run locally on your PC."
     action = action.lower().strip()
     key_map = {
         "mute": "0xAD",
@@ -71,7 +71,7 @@ def get_clipboard() -> str:
             return res.stdout.strip()
         except Exception as e:
             return f"Error reading clipboard: {e}"
-    return "Clipboard access requires Jarvis to run locally on your PC."
+    return "Clipboard access requires YoBot to run locally on your PC."
 
 @config.require_admin
 def set_clipboard(text: str) -> str:
@@ -82,4 +82,4 @@ def set_clipboard(text: str) -> str:
             return f"Copied '{text[:30]}...' to clipboard."
         except Exception as e:
             return f"Error setting clipboard: {e}"
-    return "Clipboard access requires Jarvis to run locally on your PC."
+    return "Clipboard access requires YoBot to run locally on your PC."
