@@ -10,6 +10,28 @@ import voice_service
 
 
 class VoiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_language_routing_and_explicit_override(self):
+        with patch.object(voice_service, "DEFAULT_VOICE", "configured-english"), \
+                patch.object(voice_service, "KANNADA_VOICE", "configured-kannada"):
+            self.assertEqual(voice_service.select_voice("Hello Revanth."), "configured-english")
+            self.assertEqual(voice_service.select_voice("ನಮಸ್ಕಾರ ರೇವಂತ್."), "configured-kannada")
+            self.assertEqual(voice_service.select_voice("Hello. ನಮಸ್ಕಾರ."), "configured-kannada")
+            self.assertEqual(voice_service.select_voice("ನಮಸ್ಕಾರ", "explicit-voice"), "explicit-voice")
+
+    async def test_kannada_synthesis_uses_configured_voice_and_pacing(self):
+        async def save(path):
+            Path(path).write_bytes(b"test audio")
+        with patch.object(voice_service.edge_tts, "Communicate") as communicate, \
+                patch.object(voice_service, "KANNADA_VOICE", "kn-IN-SapnaNeural"), \
+                patch.object(voice_service, "DEFAULT_RATE", "-5%"):
+            communicate.return_value.save = AsyncMock(side_effect=save)
+            path = await voice_service.text_to_speech("ನಮಸ್ಕಾರ. How are you?", pitch="+0Hz")
+        try:
+            communicate.assert_called_once_with("ನಮಸ್ಕಾರ. How are you?", voice="kn-IN-SapnaNeural",
+                                                pitch="+0Hz", rate="-5%")
+        finally:
+            os.remove(path)
+
     async def test_success_returns_nonempty_audio(self):
         async def save(path):
             Path(path).write_bytes(b"test audio")

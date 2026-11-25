@@ -149,9 +149,24 @@ fallback. Send `/speak Hello YoBot` to hear it, or send a voice note for a spoke
 reply. If speech generation fails, times out, or the reply is too long, YoBot
 returns the text instead.
 
-The default voice is Indian English `en-IN-PrabhatNeural` with natural pitch.
-Optional environment settings: `TTS_VOICE`, `TTS_PITCH` (default `+0Hz`),
-`TTS_RATE` (default `+0%`). Speech is limited to 3,000 characters per reply.
+The default is the friendly Indian English female voice `en-IN-NeerjaExpressiveNeural`.
+Replies containing Kannada script use the native female voice `kn-IN-SapnaNeural`.
+Mixed English/Kannada replies stay in that single voice to avoid speaker changes.
+Romanized Kannada is not automatically detected; use Kannada script for native pronunciation.
+Punctuation and sentence breaks are preserved for natural pauses.
+
+Set these optional Render environment variables to change voices without editing code
+(Render must apply the settings/restart the service):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `TTS_VOICE` | `en-IN-NeerjaExpressiveNeural` | English voice; `en-IN-NeerjaNeural` is an alternative |
+| `TTS_KANNADA_VOICE` | `kn-IN-SapnaNeural` | Voice for replies containing Kannada script |
+| `TTS_PITCH` | `+0Hz` | Natural pitch, without an artificial high-pitched shift |
+| `TTS_RATE` | `-5%` | Slightly relaxed conversational speed |
+
+Existing environment overrides take precedence over these defaults.
+Speech is limited to 3,000 characters per reply. Output remains MP3 for Telegram.
 
 Branding is now **YoBot**, including the GitHub repository and Render service.
 The existing Render hostname is retained for Telegram webhooks and Google OAuth

@@ -3,12 +3,26 @@ import edge_tts
 import os
 import tempfile
 
-DEFAULT_VOICE = os.getenv("TTS_VOICE", "en-IN-PrabhatNeural")
+DEFAULT_VOICE = os.getenv("TTS_VOICE", "en-IN-NeerjaExpressiveNeural")
+KANNADA_VOICE = os.getenv("TTS_KANNADA_VOICE", "kn-IN-SapnaNeural")
 DEFAULT_PITCH = os.getenv("TTS_PITCH", "+0Hz")
-DEFAULT_RATE = os.getenv("TTS_RATE", "+0%")
+DEFAULT_RATE = os.getenv("TTS_RATE", "-5%")
 MAX_SPEECH_CHARACTERS = 3000
 
-async def text_to_speech(text: str, voice: str = DEFAULT_VOICE, pitch: str = DEFAULT_PITCH) -> str:
+def select_voice(text: str, voice: str | None = None) -> str:
+    """Prefer native Kannada for Kannada script; an explicit voice always wins.
+
+    Keep mixed-language replies in one voice to avoid abrupt speaker changes.
+    Romanized Kannada cannot reliably be distinguished from English here.
+    """
+    if voice:
+        return voice
+    if any("\u0c80" <= char <= "\u0cff" for char in text):
+        return KANNADA_VOICE
+    return DEFAULT_VOICE
+
+
+async def text_to_speech(text: str, voice: str | None = None, pitch: str = DEFAULT_PITCH) -> str:
     """Synthesizes text into an audio file (mp3/ogg) and returns the file path."""
     clean_text = text.replace("*", "").replace("#", "").replace("`", "").strip()
     if not clean_text:
@@ -21,7 +35,7 @@ async def text_to_speech(text: str, voice: str = DEFAULT_VOICE, pitch: str = DEF
     tmp.close()
 
     try:
-        communicate = edge_tts.Communicate(clean_text, voice=voice, pitch=pitch, rate=DEFAULT_RATE)
+        communicate = edge_tts.Communicate(clean_text, voice=select_voice(clean_text, voice), pitch=pitch, rate=DEFAULT_RATE)
         await asyncio.wait_for(communicate.save(tmp_path), timeout=45)
         if not os.path.getsize(tmp_path):
             raise RuntimeError("Voice service returned empty audio")
@@ -31,7 +45,7 @@ async def text_to_speech(text: str, voice: str = DEFAULT_VOICE, pitch: str = DEF
             os.remove(tmp_path)
         raise
 
-def synthesize_sync(text: str, voice: str = DEFAULT_VOICE, pitch: str = DEFAULT_PITCH) -> str:
+def synthesize_sync(text: str, voice: str | None = None, pitch: str = DEFAULT_PITCH) -> str:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
